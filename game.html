@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>弓使いの討伐</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden}
+canvas{display:block;image-rendering:pixelated}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const W=960,H=540;
+canvas.width=W;canvas.height=H;
+function resize(){const s=Math.min(window.innerWidth/W,window.innerHeight/H);canvas.style.width=(W*s)+'px';canvas.style.height=(H*s)+'px'}
+resize();window.addEventListener('resize',resize);
+
+const GROUND_Y=H-60,GRAVITY=0.5;
+
+// ===== STATE =====
+let scene='title',difficulty='normal',tutorialPage=0;
+let menuSel=0,diffSel=1;
+let stage=0; // 0-3
+const STAGE_NAMES=['草原ステージ','洞窟ステージ','火山ステージ','魔王城ステージ'];
+const STAGE_BG=[
+  {bg:'#0c0e2e',floor:'#1a1e4a',dot:'#161a42',plat:'#2a3068',platH:'#3a4088',leg:'#222850',line:'#252a5e'},
+  {bg:'#0a0a18',floor:'#1a1830',dot:'#12122a',plat:'#2a2850',platH:'#3a3870',leg:'#201e40',line:'#252050'},
+  {bg:'#1a0a0a',floor:'#2a1818',dot:'#221212',plat:'#3a2020',platH:'#4a3030',leg:'#2a1515',line:'#351a1a'},
+  {bg:'#08061a',floor:'#14122e',dot:'#100e24',plat:'#221a50',platH:'#332a68',leg:'#1a1440',line:'#1e1848'}
+];
+
+const TPAGES=[
+  {title:'移動',text:'← → キーで左右に移動します。',hint:'やってみよう！左右に動いてみて！',act:'move'},
+  {title:'ジャンプ',text:'エンターキーでジャンプ！\n長押しすると大ジャンプになります。',hint:'エンターキーを押してみよう！',act:'jump'},
+  {title:'弓矢',text:'スペースキーで弓矢を発射！\n長押しすると上方向に飛びます。',hint:'スペースキーで矢を撃ってみよう！',act:'shoot'},
+  {title:'準備完了！',text:'右へ進んでゴールの旗を目指そう！\n敵に矢を当てて倒せるよ！\n敵や火の玉に触れるとダメージ！',hint:'スペースキーでゲーム開始！',act:'done'}
+];
+let tDone={move:false,jump:false,shoot:false,done:false};
+let tutorialRound=0; // 0,1,2 = max 3 rounds
+
+let score=0,lives=3,maxLives=3,playerHp=100,maxHp=100,gameOver=false,gameTick=0;
+let shakeT=0,shakeI=0,particles=[],fTexts=[],worldOff=0;
+let goalX=5000; // goal flag position
+let goalReached=false,clearTimer=0;
+
+const DIFF={
+  easy:{hp:150,lives:5,espd:0.5,fspd:1.5,frate:0.7,mult:0.6},
+  normal:{hp:100,lives:3,espd:0.8,fspd:2.2,frate:1,mult:1},
+  hard:{hp:80,lives:2,espd:1.2,fspd:3,frate:1.5,mult:1.5}
+};
+let ds=DIFF.normal;
+
+// ===== INPUT =====
+const keys={};
+let spHold=0,enHold=0,spDown=false,enDown=false,spRel=false,enRel=false,anyKey=false;
+let sRel=false; // S key release
+document.addEventListener('keydown',e=>{e.preventDefault();if(!keys[e.code])anyKey=true;keys[e.code]=true;
+  if(e.code==='Space'&&!spDown){spDown=true;spHold=0}
+  if(e.code==='Enter'&&!enDown){enDown=true;enHold=0}
+});
+document.addEventListener('keyup',e=>{
+  keys[e.code]=false;
+  if(e.code==='Space'&&spDown){spDown=false;spRel=true}
+  if(e.code==='Enter'&&enDown){enDown=false;enRel=true}
+  if(e.code==='KeyS')sRel=true;
+});
+
+// ===== PLAYER =====
+const P={x:200,y:GROUND_Y,vx:0,vy:0,onG:true,face:1,wf:0,inv:0,cd:0,shootAnim:0,shootAngle:0};
+// shootAngle: 0=forward, 1=diagonal up, 2=steep up
+function getShootLevel(){
+  const pw=Math.min(spHold,40);
+  if(pw>=30)return 2; // steep up
+  if(pw>=12)return 1; // diagonal
+  return 0; // forward
+}
+function pJump(){if(!P.onG)return;const pw=Math.min(enHold,30);P.vy=pw>=25?-14:pw>=12?-11:-9;P.onG=false}
+
+let arrows=[],enemies=[],fireballs=[],platforms=[];
+
+function shoot(){
+  if(P.cd>0)return;
+  const lv=getShootLevel();
+  let vx,vy;
+  if(lv===2){vx=P.face*4;vy=-10}      // steep up
+  else if(lv===1){vx=P.face*6;vy=-5}   // diagonal
+  else{vx=P.face*8;vy=0}               // forward
+  arrows.push({x:P.x+P.face*14,y:P.y-20,vx,vy,life:150});
+  P.cd=10;P.shootAnim=15;P.shootAngle=lv;
+}
+
+// ===== STAGE GENERATION =====
+function genStage(stg){
+  platforms=[];enemies=[];fireballs=[];arrows=[];particles=[];fTexts=[];
+  goalReached=false;clearTimer=0;
+  P.x=200;P.y=GROUND_Y;P.vx=0;P.vy=0;P.onG=true;P.inv=0;P.cd=0;P.face=1;
+  worldOff=0;
+
+  const len=[3200,4000,4800,5600][stg]; // stage length increases
+  goalX=len;
+
+  // Generate platforms
+  const platCount=[8,11,14,16][stg];
+  const platData=[];
+  for(let i=0;i<platCount;i++){
+    const spacing=len/(platCount+1);
+    const x=300+spacing*i+(Math.random()-0.5)*80;
+    const yOff=[80,70,60,50][stg];
+    const y=GROUND_Y-(yOff+Math.random()*80);
+    const w=70+Math.random()*60;
+    platData.push({x,y,w,h:12});
+  }
+  platforms=platData;
+
+  // Ground bugs (static)
+  const bugCount=[6,9,12,15][stg];
+  const bugSpacing=len/(bugCount+2);
+  for(let i=0;i<bugCount;i++){
+    const bx=350+bugSpacing*i+(Math.random()-0.5)*60;
+    if(Math.random()<0.7*ds.mult)enemies.push(mkBug(bx,GROUND_Y,false,false));
+  }
+
+  // Moving ground bugs
+  const movBugs=[2,3,4,5][stg];
+  for(let i=0;i<movBugs;i++){
+    const bx=400+Math.random()*(len-600);
+    if(Math.random()<0.4*ds.mult)enemies.push(mkBug(bx,GROUND_Y,true,false));
+  }
+
+  // Bugs on platforms
+  for(const p of platforms){
+    if(Math.random()<(0.4+stg*0.08)*ds.mult)enemies.push(mkBug(p.x+p.w/2,p.y,false,true));
+  }
+
+  // Dragons
+  const dragonCount=[2,3,4,5][stg];
+  const dSpacing=len/(dragonCount+2);
+  for(let i=0;i<dragonCount;i++){
+    const dx=600+dSpacing*i+(Math.random()-0.5)*100;
+    const dy=GROUND_Y-170-Math.random()*50;
+    const moving=Math.random()<(0.2+stg*0.1);
+    enemies.push(mkDragon(dx,dy,moving));
+  }
+
+  // Dragon HP scales with stage
+  for(const e of enemies){
+    if(e.type==='dragon'){
+      e.hp=4+stg*2;
+      e.maxHp=e.hp;
+    }
+  }
+}
+
+function mkBug(x,y,mov,onPlat){
+  return{type:'bug',x,y,w:28,h:20,vx:mov?(Math.random()<0.5?1:-1)*ds.espd:0,hp:1,lt:0,mov,onPlat,
+    ox:x,mr:mov?80:0,st:Math.random()*200,canShoot:onPlat&&Math.random()<0.4};
+}
+function mkDragon(x,y,mov){
+  return{type:'dragon',x,y,w:90,h:64,vx:mov?(Math.random()<0.5?1:-1)*ds.espd*0.8:0,hp:4,maxHp:4,
+    wt:Math.random()*6,so:Math.random()*Math.PI*2,mov,ox:x,oy:y,mr:mov?120:0,ft:80+Math.random()*120};
+}
+
+function addP(x,y,c,n){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-0.5)*6,vy:-Math.random()*5-1,life:20+Math.random()*20,c,sz:2+Math.random()*3})}
+function addFT(x,y,t,c){fTexts.push({x,y,t,c,life:50,vy:-1.5})}
+function rOv(ax,ay,aw,ah,bx,by,bw,bh){return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by}
+function dR(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h)}
+
+function hurt(d){
+  if(P.inv>0||goalReached)return;
+  playerHp-=d;P.inv=60;shakeT=10;shakeI=5;
+  addP(P.x,P.y-20,'#f66',8);
+  if(playerHp<=0){playerHp=0;lives--;if(lives<=0){gameOver=true;scene='gameover';return}playerHp=maxHp;P.inv=90}
+}
+
+// ===== DRAWING =====
+function stC(){return STAGE_BG[stage]||STAGE_BG[0]}
+
+function drawBg(){
+  const c=stC();
+  ctx.fillStyle=c.bg;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=c.dot;
+  const sp=32,ox=(-worldOff*0.3)%sp;
+  for(let r=0;r<H/sp+1;r++){const o=r%2===0?0:sp/2;for(let col=-1;col<W/sp+2;col++){ctx.beginPath();ctx.arc(col*sp+o+ox,r*sp,5,0,Math.PI*2);ctx.fill()}}
+  ctx.fillStyle=c.floor;ctx.fillRect(0,GROUND_Y,W,H-GROUND_Y);
+  ctx.fillStyle=c.line;ctx.fillRect(0,GROUND_Y,W,2);
+}
+
+function drawPlats(){
+  const c=stC();
+  for(const p of platforms){
+    const px=p.x-worldOff;if(px>W+50||px+p.w<-50)continue;
+    ctx.fillStyle=c.plat;ctx.fillRect(px,p.y,p.w,p.h);
+    ctx.fillStyle=c.platH;ctx.fillRect(px,p.y,p.w,3);
+    ctx.fillStyle=c.leg;
+    ctx.fillRect(px+4,p.y+p.h,4,GROUND_Y-p.y-p.h);
+    ctx.fillRect(px+p.w-8,p.y+p.h,4,GROUND_Y-p.y-p.h);
+  }
+}
+
+function drawGoalFlag(){
+  const gx=goalX-worldOff;
+  if(gx<-40||gx>W+40)return;
+  // Pole
+  ctx.fillStyle='#888';ctx.fillRect(gx,GROUND_Y-100,4,100);
+  // Flag
+  const wave=Math.sin(gameTick*0.08)*3;
+  ctx.fillStyle=goalReached?'#4f4':'#f44';
+  ctx.beginPath();
+  ctx.moveTo(gx+4,GROUND_Y-100);
+  ctx.lineTo(gx+40+wave,GROUND_Y-88);
+  ctx.lineTo(gx+4,GROUND_Y-76);
+  ctx.closePath();ctx.fill();
+  // Star on flag
+  ctx.fillStyle='#ff0';ctx.font='bold 14px monospace';ctx.textAlign='center';
+  ctx.fillText('★',gx+20+wave*0.5,GROUND_Y-85);
+  ctx.textAlign='left';
+  // "GOAL" text
+  ctx.fillStyle='#fff';ctx.font='bold 12px monospace';ctx.textAlign='center';
+  ctx.fillText('GOAL',gx+2,GROUND_Y-105);
+  ctx.textAlign='left';
+}
+
+function drawHpBar(){
+  const px=P.x-worldOff,bw=36,bh=5,bx=px-bw/2,by=P.y-54;
+  const r=playerHp/maxHp;
+  dR(bx-1,by-1,bw+2,bh+2,'#111');dR(bx,by,bw,bh,'#333');
+  dR(bx,by,bw*r,bh,r>0.6?'#4c4':r>0.3?'#cc4':'#c44');
+}
+
+function drawPlayer(){
+  const px=P.x-worldOff,py=P.y,f=P.face;
+  if(P.inv>0&&Math.floor(P.inv/3)%2)return;
+
+  // Determine bow angle: during charge or after shoot
+  let bowAngle=0; // radians, 0=forward
+  if(spDown){
+    const lv=getShootLevel();
+    if(lv===2)bowAngle=-Math.PI*0.38;      // steep up
+    else if(lv===1)bowAngle=-Math.PI*0.18;  // diagonal up
+    else bowAngle=0;                         // forward
+  }else if(P.shootAnim>0){
+    // Recoil: arm kicks back slightly
+    if(P.shootAngle===2)bowAngle=-Math.PI*0.38;
+    else if(P.shootAngle===1)bowAngle=-Math.PI*0.18;
+    else bowAngle=0;
+  }
+
+  // Body
+  dR(px-5,py-36,10,20,'#3a7ecf');dR(px-6,py-38,12,6,'#3a7ecf');
+  // Head
+  dR(px-5,py-46,10,10,'#f0c8a0');dR(px-6,py-48,12,4,'#5a3a20');dR(px+(f>0?-7:5),py-48,2,6,'#5a3a20');
+  dR(px+f*2,py-43,2,2,'#222');
+  // Legs
+  const lo=P.onG?Math.sin(P.wf)*3:0;
+  dR(px-4,py-16,4,16,'#2a5a20');dR(px,py-16+lo,4,16-lo,'#2a5a20');
+  dR(px-5,py-2,5,2,'#4a3020');dR(px,py-2+(P.onG?lo:0),5,2,'#4a3020');
+
+  // Bow + arm with rotation
+  const armX=px+f*6,armY=py-30;
+  ctx.save();
+  ctx.translate(armX,armY);
+  ctx.rotate(bowAngle*f);
+
+  // Arm
+  dR(0,-2,8*f,3,'#f0c8a0');
+
+  // Bow arc
+  const bowR=10;
+  ctx.strokeStyle='#8B4513';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(f*6,0,bowR,-Math.PI*0.4+Math.PI*0.5,Math.PI*0.4+Math.PI*0.5,false);ctx.stroke();
+
+  // Bowstring + pull
+  const pb=spDown?Math.min(spHold/40,1)*6:0;
+  const recoil=P.shootAnim>0?Math.min(P.shootAnim/15,1)*4:0;
+  ctx.strokeStyle='#ccc';ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.moveTo(f*6+Math.cos(-Math.PI*0.4+Math.PI*0.5)*bowR,Math.sin(-Math.PI*0.4+Math.PI*0.5)*bowR);
+  ctx.lineTo(f*6-f*pb+f*recoil,0);
+  ctx.lineTo(f*6+Math.cos(Math.PI*0.4+Math.PI*0.5)*bowR,Math.sin(Math.PI*0.4+Math.PI*0.5)*bowR);
+  ctx.stroke();
+
+  // Arrow nocked on bowstring while charging
+  if(spDown&&spHold>2){
+    ctx.fillStyle='#d4a050';
+    ctx.fillRect(f*6-f*pb-4*f,- 1,12,2);
+    ctx.fillStyle='#ccc';
+    ctx.beginPath();ctx.moveTo(f*6-f*pb+8*f,-0);ctx.lineTo(f*6-f*pb+5*f,-3);ctx.lineTo(f*6-f*pb+5*f,3);ctx.fill();
+  }
+
+  ctx.restore();
+
+  // Angle indicator while charging
+  if(spDown){
+    const lv=getShootLevel();
+    const labels=['→ 正面','↗ ななめ','↑ 急角度'];
+    const colors=['#4af','#ff0','#f44'];
+    ctx.fillStyle=colors[lv];ctx.font='bold 12px monospace';ctx.textAlign='center';
+    ctx.fillText(labels[lv],px,py-60);
+    ctx.textAlign='left';
+  }
+
+  // Shoot anim countdown
+  if(P.shootAnim>0)P.shootAnim--;
+
+  drawHpBar();
+}
+
+function drawDragon(e){
+  const dx=e.x-worldOff,dy=e.y;if(dx<-120||dx>W+120)return;
+  const f=e.vx>0?1:e.vx<0?-1:(P.x>e.x?1:-1);
+  // Body
+  dR(dx-32,dy-20,64,38,'#8b1a1a');dR(dx-38,dy-13,76,26,'#a02020');dR(dx-22,dy,44,13,'#cc6644');
+  // Head
+  dR(dx+f*38,dy-22,22*f,28,'#a02020');dR(dx+f*48,dy-16,12*f,10,'#a02020');
+  // Eye
+  dR(dx+f*44,dy-16,5,5,'#ff0');dR(dx+f*46,dy-14,2,2,'#000');
+  // Wings
+  e.wt+=0.15;const wy=Math.sin(e.wt)*12;
+  ctx.fillStyle='#6a1010';
+  ctx.beginPath();ctx.moveTo(dx-12,dy-20);ctx.lineTo(dx-6,dy-54+wy);ctx.lineTo(dx+20,dy-42+wy);ctx.lineTo(dx+12,dy-20);ctx.fill();
+  ctx.beginPath();ctx.moveTo(dx-12,dy-20);ctx.lineTo(dx-26,dy-48+wy);ctx.lineTo(dx-3,dy-38+wy);ctx.fill();
+  // Tail
+  ctx.strokeStyle='#8b1a1a';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(dx-f*38,dy);ctx.quadraticCurveTo(dx-f*58,dy-16,dx-f*70,dy+6);ctx.stroke();
+  // HP bar
+  const hr=e.hp/e.maxHp;
+  dR(dx-32,dy-42,64,5,'#333');dR(dx-32,dy-42,64*hr,5,hr>0.6?'#4c4':hr>0.3?'#cc4':'#c44');
+}
+
+function drawBug(e){
+  const bx=e.x-worldOff,by=e.y;if(bx<-40||bx>W+40)return;
+  const f=e.vx>0?1:e.vx<0?-1:(P.x>e.x?1:-1);
+  e.lt+=e.mov?0.3:0.1;
+  // Body
+  dR(bx-10,by-14,20,14,'#4a2a60');dR(bx-7,by-18,14,7,'#5a3a70');
+  // Eye
+  dR(bx+f*5,by-17,3,3,'#ff6');
+  // Legs
+  const la=Math.sin(e.lt)*3;
+  dR(bx-12,by-4+la,4,4,'#3a1a50');dR(bx+8,by-4-la,4,4,'#3a1a50');
+  dR(bx-14,by-9-la,4,4,'#3a1a50');dR(bx+10,by-9+la,4,4,'#3a1a50');
+  // Antennae
+  ctx.strokeStyle='#5a3a70';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(bx+f*7,by-18);ctx.lineTo(bx+f*14,by-26+Math.sin(e.lt*2)*3);ctx.stroke();
+  if(e.canShoot)dR(bx-3,by-22,6,3,'#f84');
+}
+
+function drawArrow(a){
+  const ax=a.x-worldOff,ay=a.y;if(ax<-20||ax>W+20)return;
+  const ang=Math.atan2(a.vy,a.vx);
+  ctx.save();ctx.translate(ax,ay);ctx.rotate(ang);
+  ctx.fillStyle='#d4a050';ctx.fillRect(-10,-1,20,2);
+  ctx.fillStyle='#ccc';ctx.beginPath();ctx.moveTo(10,0);ctx.lineTo(6,-3);ctx.lineTo(6,3);ctx.fill();
+  ctx.fillStyle='#c44';ctx.beginPath();ctx.moveTo(-10,0);ctx.lineTo(-7,-3);ctx.lineTo(-7,0);ctx.fill();
+  ctx.beginPath();ctx.moveTo(-10,0);ctx.lineTo(-7,3);ctx.lineTo(-7,0);ctx.fill();
+  ctx.restore();
+}
+
+function drawFB(fb){
+  const fx=fb.x-worldOff,fy=fb.y;if(fx<-20||fx>W+20)return;
+  if(fb.dragon){
+    ctx.fillStyle='#f84';ctx.beginPath();ctx.arc(fx,fy,fb.sz,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fc2';ctx.beginPath();ctx.arc(fx,fy,fb.sz*0.5,0,Math.PI*2);ctx.fill();
+  }else{
+    ctx.fillStyle='#a6f';ctx.beginPath();ctx.arc(fx,fy,fb.sz,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#c8f';ctx.beginPath();ctx.arc(fx,fy,fb.sz*0.4,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function drawGauge(x,y,lb,rat,mc,xc){
+  ctx.fillStyle='#fff8';ctx.font='bold 11px monospace';ctx.textAlign='left';ctx.fillText(lb,x,y-6);
+  dR(x,y,60,8,'#222');dR(x,y,60*rat,8,rat>=0.75?xc:rat>=0.3?mc:'#666');
+  ctx.strokeStyle='#555';ctx.lineWidth=1;ctx.strokeRect(x,y,60,8);
+}
+
+function drawHUD(){
+  ctx.fillStyle='#fff';ctx.font='bold 18px monospace';ctx.textAlign='left';
+  ctx.fillText('スコア: '+score,16,30);
+  // Stage name
+  ctx.fillStyle='#aaa';ctx.font='bold 14px monospace';
+  ctx.fillText(STAGE_NAMES[stage]+' ('+(stage+1)+'/4)',16,50);
+  // Progress bar
+  const prog=Math.min(P.x/goalX,1);
+  dR(16,56,120,6,'#333');dR(16,56,120*prog,6,'#4af');
+  ctx.fillStyle='#fff';ctx.font='9px monospace';ctx.fillText(Math.floor(prog*100)+'%',140,63);
+
+  // Hearts
+  for(let i=0;i<lives;i++){const hx=W-36-i*28,hy=14;ctx.fillStyle='#e44';ctx.beginPath();ctx.moveTo(hx,hy+4);ctx.bezierCurveTo(hx,hy,hx-8,hy,hx-8,hy+4);ctx.bezierCurveTo(hx-8,hy+10,hx,hy+14,hx,hy+18);ctx.bezierCurveTo(hx,hy+14,hx+8,hy+10,hx+8,hy+4);ctx.bezierCurveTo(hx+8,hy,hx,hy,hx,hy+4);ctx.fill()}
+  ctx.fillStyle='#fff';ctx.font='bold 13px monospace';ctx.textAlign='right';ctx.fillText('ライフ',W-36-lives*28-8,28);ctx.textAlign='left';
+  const dn={easy:'かんたん',normal:'ふつう',hard:'むずかしい'}[difficulty];
+  ctx.fillStyle='#888';ctx.font='12px monospace';ctx.textAlign='right';ctx.fillText(dn,W-16,50);ctx.textAlign='left';
+  if(spDown)drawGauge(16,H-50,'弓チャージ',Math.min(spHold/40,1),'#dd0','#e33');
+  if(enDown)drawGauge(16,H-30,'ジャンプ力',Math.min(enHold/30,1),'#ffa','#f6a');
+}
+
+function drawPart(){for(const p of particles){ctx.globalAlpha=p.life/40;ctx.fillStyle=p.c;ctx.fillRect(p.x-worldOff,p.y,p.sz,p.sz)}ctx.globalAlpha=1}
+function drawFTexts(){for(const t of fTexts){ctx.globalAlpha=t.life/50;ctx.fillStyle=t.c;ctx.font='bold 16px monospace';ctx.textAlign='center';ctx.fillText(t.t,t.x-worldOff,t.y)}ctx.globalAlpha=1;ctx.textAlign='left'}
+
+function drawBox(x,y,w,h,bg,bd){ctx.fillStyle=bg;ctx.fillRect(x,y,w,h);ctx.strokeStyle=bd;ctx.lineWidth=2;ctx.strokeRect(x,y,w,h)}
+
+// ===== SCENE SCREENS =====
+function drawTitle(){
+  drawBg();
+  ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#ffd700';ctx.font='bold 48px monospace';ctx.textAlign='center';
+  ctx.fillText('弓使いの討伐',W/2,H/2-80);
+  const items=['ゲームスタート','チュートリアル'];
+  for(let i=0;i<items.length;i++){
+    const sel=menuSel===i,iy=H/2-10+i*50;
+    if(sel){drawBox(W/2-140,iy-22,280,40,'rgba(255,215,0,0.15)','#ffd700');ctx.fillStyle='#ffd700'}else ctx.fillStyle='#aaa';
+    ctx.font='bold 22px monospace';ctx.fillText((sel?'▶ ':'')+items[i],W/2,iy+6);
+  }
+  ctx.fillStyle='#666';ctx.font='14px monospace';ctx.fillText('↑↓: 選択　エンター: 決定',W/2,H/2+120);ctx.textAlign='left';
+}
+
+function drawDiffScreen(){
+  drawBg();ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#fff';ctx.font='bold 32px monospace';ctx.textAlign='center';ctx.fillText('難易度を選んでください',W/2,H/2-90);
+  const its=[{l:'かんたん',d:'HP多め・敵ゆっくり',c:'#4f4'},{l:'ふつう',d:'バランス良し',c:'#ff0'},{l:'むずかしい',d:'HP少なめ・敵が強い',c:'#f44'}];
+  for(let i=0;i<its.length;i++){
+    const sel=diffSel===i,iy=H/2-20+i*55;
+    if(sel){drawBox(W/2-160,iy-22,320,44,'rgba(255,255,255,0.08)',its[i].c);ctx.fillStyle=its[i].c}else ctx.fillStyle='#888';
+    ctx.font='bold 22px monospace';ctx.fillText((sel?'▶ ':'')+its[i].l,W/2,iy+6);
+    ctx.font='13px monospace';ctx.fillStyle=sel?'#ccc':'#666';ctx.fillText(its[i].d,W/2,iy+24);
+  }
+  ctx.fillStyle='#666';ctx.font='14px monospace';ctx.fillText('↑↓: 選択　エンター: 決定',W/2,H/2+160);ctx.textAlign='left';
+}
+
+function drawTut(){
+  drawBg();drawPlats();drawPlayer();for(const a of arrows)drawArrow(a);
+  const pg=TPAGES[tutorialPage];
+  drawBox(W/2-260,30,520,150,'rgba(10,10,40,0.92)','#ffd700');
+  ctx.fillStyle='#ffd700';ctx.font='bold 24px monospace';ctx.textAlign='center';ctx.fillText(pg.title+' ('+(tutorialPage+1)+'/'+TPAGES.length+')',W/2,66);
+  ctx.fillStyle='#ddd';ctx.font='16px monospace';
+  pg.text.split('\n').forEach((l,i)=>ctx.fillText(l,W/2,94+i*22));
+  const done=tDone[pg.act];
+  if(done){
+    ctx.fillStyle='#4f4';ctx.font='bold 15px monospace';
+    if(tutorialPage<TPAGES.length-1){
+      ctx.fillText('✓ クリア！ [ S ] 次へ',W/2,H-30);
+    }else{
+      ctx.fillText('✓ 全ステップクリア！',W/2,H-46);
+      ctx.fillStyle='#4f4';ctx.fillText('[ S ] ゲーム開始',W/2,H-24);
+      if(tutorialRound<2){
+        ctx.fillStyle='#aaa';ctx.fillText('[ R ] もう一度チュートリアル ('+(3-tutorialRound-1)+'回残り)',W/2,H-6);
+      }
+    }
+  }else{
+    ctx.fillStyle='#f90';ctx.font='bold 15px monospace';
+    ctx.fillText(pg.hint,W/2,H-30);
+  }
+  ctx.fillStyle='#666';ctx.font='12px monospace';
+  ctx.fillText('[ S ] タイトルに戻る（未クリア時）',W/2,H-70);
+  ctx.textAlign='left';
+}
+
+function drawStageClear(){
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#ffd700';ctx.font='bold 40px monospace';ctx.textAlign='center';
+  ctx.fillText('ステージクリア！',W/2,H/2-50);
+  ctx.fillStyle='#fff';ctx.font='bold 22px monospace';
+  ctx.fillText(STAGE_NAMES[stage]+' 突破！',W/2,H/2);
+  ctx.fillStyle='#aaa';ctx.font='18px monospace';
+  ctx.fillText('スコア: '+score,W/2,H/2+35);
+  if(stage<3){
+    ctx.fillStyle='#4f4';ctx.font='bold 20px monospace';
+    ctx.fillText('[ S ] 次のステージへ',W/2,H/2+80);
+  }else{
+    ctx.fillStyle='#ffd700';ctx.font='bold 20px monospace';
+    ctx.fillText('[ S ] エンディングへ',W/2,H/2+80);
+  }
+  ctx.textAlign='left';
+}
+
+function drawAllClear(){
+  drawBg();
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,H);
+  // Sparkle effect
+  for(let i=0;i<8;i++){
+    const sx=W/2+Math.cos(gameTick*0.03+i*0.8)*200;
+    const sy=H/2+Math.sin(gameTick*0.03+i*0.8)*100-30;
+    ctx.fillStyle='#ffd700';ctx.font='20px monospace';ctx.textAlign='center';
+    ctx.fillText('★',sx,sy);
+  }
+  ctx.fillStyle='#ffd700';ctx.font='bold 48px monospace';ctx.textAlign='center';
+  ctx.fillText('全ステージクリア！',W/2,H/2-60);
+  ctx.fillStyle='#fff';ctx.font='bold 24px monospace';
+  ctx.fillText('おめでとう！',W/2,H/2-10);
+  ctx.fillStyle='#aaa';ctx.font='20px monospace';
+  ctx.fillText('最終スコア: '+score,W/2,H/2+30);
+  ctx.fillStyle='#4f4';ctx.font='bold 18px monospace';
+  ctx.fillText('[ R ] もう一度遊ぶ　[ T ] タイトルへ',W/2,H/2+80);
+  ctx.textAlign='left';
+}
+
+function drawGO(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#e44';ctx.font='bold 48px monospace';ctx.textAlign='center';ctx.fillText('ゲームオーバー',W/2,H/2-40);
+  ctx.fillStyle='#fff';ctx.font='bold 24px monospace';ctx.fillText('スコア: '+score,W/2,H/2+10);
+  ctx.fillStyle='#4f4';ctx.font='bold 20px monospace';ctx.fillText('[ R ] リスタート　[ T ] タイトルへ',W/2,H/2+60);ctx.textAlign='left';
+}
+
+// ===== GAME LOGIC =====
+function resetFull(){
+  score=0;gameOver=false;gameTick=0;stage=0;
+  ds=DIFF[difficulty];maxHp=ds.hp;playerHp=maxHp;lives=ds.lives;maxLives=ds.lives;
+  genStage(0);
+}
+
+function updGame(){
+  if(gameOver||goalReached)return;
+  gameTick++;
+  if(spDown)spHold++;if(enDown)enHold++;
+  P.vx=0;
+  if(keys['ArrowLeft']){P.vx=-4;P.face=-1}
+  if(keys['ArrowRight']){P.vx=4;P.face=1}
+  P.x+=P.vx;if(P.x<20)P.x=20;
+  if(P.vx!==0&&P.onG)P.wf+=0.2;else P.wf=0;
+  P.vy+=GRAVITY;P.y+=P.vy;
+  P.onG=false;
+  if(P.y>=GROUND_Y){P.y=GROUND_Y;P.vy=0;P.onG=true}
+  for(const pl of platforms){
+    if(P.vy>=0&&P.x>pl.x&&P.x<pl.x+pl.w){
+      const prev=P.y-P.vy;if(prev<=pl.y&&P.y>=pl.y){P.y=pl.y;P.vy=0;P.onG=true}
+    }
+  }
+  if(spRel){shoot();spHold=0;spRel=false}
+  if(enRel){pJump();enHold=0;enRel=false}
+  P.cd=Math.max(0,P.cd-1);P.inv=Math.max(0,P.inv-1);
+  const to=P.x-W*0.35;worldOff+=(to-worldOff)*0.08;if(worldOff<0)worldOff=0;
+
+  // Goal check
+  if(P.x>=goalX-20){
+    goalReached=true;clearTimer=0;
+    addP(goalX,GROUND_Y-50,'#ffd700',20);
+    addFT(goalX,GROUND_Y-80,'+500','#ffd700');
+    score+=500;
+    scene='stageclear';
+    return;
+  }
+
+  // Arrows
+  for(let i=arrows.length-1;i>=0;i--){
+    const a=arrows[i];a.vy+=0.12;a.x+=a.vx;a.y+=a.vy;a.life--;
+    if(a.life<=0||a.y>GROUND_Y+10){arrows.splice(i,1);continue}
+    for(let j=enemies.length-1;j>=0;j--){
+      const e=enemies[j],ex=e.x-e.w/2,ey=e.type==='dragon'?e.y-e.h/2:e.y-e.h;
+      if(rOv(a.x-4,a.y-2,8,4,ex,ey,e.w,e.h)){
+        e.hp--;arrows.splice(i,1);addP(a.x,a.y,'#ff0',5);
+        if(e.hp<=0){const pts=e.type==='dragon'?100:20;score+=pts;addP(e.x,e.y,e.type==='dragon'?'#f44':'#a6f',15);addFT(e.x,e.y-20,'+'+pts,'#ff0');enemies.splice(j,1)}
+        break;
+      }
+    }
+  }
+
+  // Enemies
+  for(const e of enemies){
+    if(e.type==='dragon'){
+      e.so+=0.02;
+      if(e.mov){e.x+=e.vx;if(Math.abs(e.x-e.ox)>e.mr)e.vx*=-1}
+      e.y=e.oy+Math.sin(e.so)*15;
+      e.ft--;
+      if(e.ft<=0&&Math.abs(e.x-P.x)<600){
+        const ang=Math.atan2((P.y-20)-e.y,P.x-e.x);
+        fireballs.push({x:e.x,y:e.y,vx:Math.cos(ang)*ds.fspd,vy:Math.sin(ang)*ds.fspd,life:200,sz:5,dragon:true});
+        e.ft=80+Math.random()*120/ds.frate;
+      }
+    }else{
+      if(e.mov){e.x+=e.vx;if(Math.abs(e.x-e.ox)>e.mr)e.vx*=-1}
+      if(e.canShoot){e.st--;if(e.st<=0&&Math.abs(e.x-P.x)<350){
+        const d=P.x>e.x?1:-1;
+        fireballs.push({x:e.x,y:e.y-8,vx:d*ds.fspd*0.7,vy:-1,life:120,sz:3,dragon:false});
+        e.st=150+Math.random()*100;
+      }}
+    }
+    if(P.inv<=0){
+      const px=P.x-6,py=P.y-46,ex=e.x-e.w/2,ey=e.type==='dragon'?e.y-e.h/2:e.y-e.h;
+      if(rOv(px,py,12,46,ex,ey,e.w,e.h))hurt(e.type==='dragon'?25:15);
+    }
+  }
+
+  // Fireballs
+  for(let i=fireballs.length-1;i>=0;i--){
+    const fb=fireballs[i];fb.x+=fb.vx;fb.y+=fb.vy;
+    if(fb.dragon)fb.vy+=0.03;
+    fb.life--;if(fb.life<=0||fb.y>GROUND_Y+10){fireballs.splice(i,1);continue}
+    if(P.inv<=0){if(Math.hypot(fb.x-P.x,fb.y-(P.y-23))<fb.sz+10){hurt(fb.dragon?20:10);addP(fb.x,fb.y,'#f84',6);fireballs.splice(i,1)}}
+  }
+
+  for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life--;if(p.life<=0)particles.splice(i,1)}
+  for(let i=fTexts.length-1;i>=0;i--){const t=fTexts[i];t.y+=t.vy;t.life--;if(t.life<=0)fTexts.splice(i,1)}
+  if(shakeT>0)shakeT--;
+}
+
+function updTut(){
+  if(spDown)spHold++;if(enDown)enHold++;
+  P.vx=0;
+  if(keys['ArrowLeft']){P.vx=-4;P.face=-1}
+  if(keys['ArrowRight']){P.vx=4;P.face=1}
+  P.x+=P.vx;if(P.x<20)P.x=20;if(P.x>W-20)P.x=W-20;
+  if(P.vx!==0&&P.onG)P.wf+=0.2;else P.wf=0;
+  P.vy+=GRAVITY;P.y+=P.vy;
+  if(P.y>=GROUND_Y){P.y=GROUND_Y;P.vy=0;P.onG=true}
+  const curAct=TPAGES[tutorialPage].act;
+  const stepDone=tDone[curAct];
+  if(!stepDone){
+    if(spRel){shoot();spHold=0;spRel=false;tDone.shoot=true}
+    if(enRel){pJump();enHold=0;enRel=false;tDone.jump=true}
+  }
+  P.cd=Math.max(0,P.cd-1);
+  if(Math.abs(P.vx)>0)tDone.move=true;
+  for(let i=arrows.length-1;i>=0;i--){const a=arrows[i];a.vy+=0.12;a.x+=a.vx;a.y+=a.vy;a.life--;if(a.life<=0||a.y>GROUND_Y+10)arrows.splice(i,1)}
+}
+
+// ===== MAIN LOOP =====
+function loop(){
+  ctx.save();
+  if(shakeT>0){ctx.translate((Math.random()-0.5)*shakeI*(shakeT/10),(Math.random()-0.5)*shakeI*(shakeT/10))}
+  gameTick++;
+
+  switch(scene){
+    case 'title':
+      drawTitle();
+      if(keys['ArrowUp']&&anyKey){menuSel=0;anyKey=false}
+      if(keys['ArrowDown']&&anyKey){menuSel=1;anyKey=false}
+      if(enRel||spRel){
+        if(menuSel===0)scene='difficulty';
+        else{scene='tutorial';P.x=W/2;P.y=GROUND_Y;P.vx=0;P.vy=0;P.onG=true;arrows=[];platforms=[];tutorialPage=0;tDone={move:false,jump:false,shoot:false,done:false};tutorialRound=0;worldOff=0}
+        enRel=false;spRel=false;
+      }
+      break;
+
+    case 'difficulty':
+      drawDiffScreen();
+      if(keys['ArrowUp']&&anyKey){diffSel=Math.max(0,diffSel-1);anyKey=false}
+      if(keys['ArrowDown']&&anyKey){diffSel=Math.min(2,diffSel+1);anyKey=false}
+      if(enRel||spRel){difficulty=['easy','normal','hard'][diffSel];resetFull();scene='game';enRel=false;spRel=false}
+      break;
+
+    case 'tutorial':
+      updTut();drawTut();
+      {const curDone=tDone[TPAGES[tutorialPage].act];
+      if(curDone){
+        if(sRel){
+          sRel=false;
+          if(tutorialPage<TPAGES.length-1){tutorialPage++}
+          else{tDone.done=true;scene='difficulty'}
+        }
+        // R to repeat tutorial (max 3 times)
+        if(tutorialPage===TPAGES.length-1&&tDone.done!==true&&keys['KeyR']){/*handled above*/}
+        if(tutorialPage===TPAGES.length-1&&keys['KeyR']&&tutorialRound<2){
+          tutorialRound++;tutorialPage=0;
+          tDone={move:false,jump:false,shoot:false,done:false};
+          P.x=W/2;P.y=GROUND_Y;P.vx=0;P.vy=0;P.onG=true;arrows=[];
+        }
+      }else{
+        // Not done yet: S = back to title
+        if(sRel){sRel=false;scene='title';menuSel=0}
+      }}
+      enRel=false;spRel=false;sRel=false;
+      break;
+
+    case 'game':
+      updGame();drawBg();drawPlats();drawGoalFlag();
+      for(const a of arrows)drawArrow(a);
+      for(const fb of fireballs)drawFB(fb);
+      for(const e of enemies){if(e.type==='dragon')drawDragon(e);else drawBug(e)}
+      drawPlayer();drawPart();drawFTexts();drawHUD();
+      break;
+
+    case 'stageclear':
+      drawBg();drawPlats();drawGoalFlag();
+      for(const e of enemies){if(e.type==='dragon')drawDragon(e);else drawBug(e)}
+      drawPlayer();drawStageClear();
+      if(sRel){
+        sRel=false;
+        if(stage<3){stage++;playerHp=maxHp;genStage(stage);scene='game'}
+        else{scene='allclear'}
+      }
+      break;
+
+    case 'allclear':
+      drawAllClear();
+      if(keys['KeyR']){resetFull();scene='game'}
+      if(keys['KeyT']){scene='title';menuSel=0}
+      break;
+
+    case 'gameover':
+      drawBg();drawPlats();
+      for(const e of enemies){if(e.type==='dragon')drawDragon(e);else drawBug(e)}
+      drawPlayer();drawGO();
+      if(keys['KeyR']){resetFull();scene='game'}
+      if(keys['KeyT']){scene='title';menuSel=0}
+      break;
+  }
+  anyKey=false;sRel=false;enRel=false;spRel=false;
+  ctx.restore();requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

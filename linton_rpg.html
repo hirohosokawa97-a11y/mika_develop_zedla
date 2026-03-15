@@ -1,0 +1,2566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ゼドラの伝説</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+canvas { display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// ===== GAME STATE =====
+let gameState = 'title'; // title, charselect, cutscene, game, gameover, victory, levelup, skillpanel
+let frame = 0;
+let cutsceneStep = 0;
+let cutsceneTimer = 0;
+
+// Cutscene variables
+let cutsceneFlash = 0;
+let cutsceneBlack = 0;
+let cutsceneTextAlpha = 0;
+let dragonX = 1000;
+let dragonY = -100;
+let shieldAlpha = 0;
+let partnerX = 520;
+let playerCutX = 280;
+let fireBreathAlpha = 0;
+let dragonRoarSize = 0;
+
+// Banner
+let hillClearBanner = 0;
+
+// Player trail for companion following
+let playerTrail = [];
+
+// Character selection
+let selectedChar = 0;
+const charTypes = [
+  { name: 'お姉ちゃん', hairColor: '#FF69B4', outfitColor: '#E8325A', hair: 'long', gender: 'female' },
+  { name: '妹', hairColor: '#FFD700', outfitColor: '#FF8C00', hair: 'twintail', gender: 'female' },
+  { name: 'お兄ちゃん', hairColor: '#2C1810', outfitColor: '#2244AA', hair: 'short', gender: 'male' },
+  { name: '弟', hairColor: '#228B22', outfitColor: '#228B22', hair: 'spiky', gender: 'male' },
+  { name: 'ゼルダ', hairColor: '#FFD700', outfitColor: '#4169E1', hair: 'long', gender: 'female' }
+];
+
+// Player
+let player = {
+  x: 400, y: 300,
+  vx: 0, vy: 0,
+  speed: 3,
+  facing: 2, // 0=up,1=right,2=down,3=left
+  hp: 80, maxHp: 80,
+  mp: 40, maxMp: 40,
+  atk: 8, def: 2,
+  level: 1, exp: 0, expNext: 100,
+  name: 'リントン',
+  charType: 0,
+  skills: [0], // unlocked skills (giga slash from start)
+  activeEffects: {},
+  invincible: 0,
+  attacking: 0,
+  attackDir: 2,
+  walkAnim: 0
+};
+
+// Companions
+let companions = [];
+const companionDefs = [
+  { id: 'zelda', name: 'ゼルダ', hp: 60, maxHp: 60, atk: 5, def: 2, color: '#4169E1', joinedMap: 1, joined: false },
+  { id: 'sid', name: 'シド', hp: 80, maxHp: 80, atk: 7, def: 4, color: '#00BFFF', joinedMap: 2, joined: false },
+  { id: 'churi', name: 'チューリ', hp: 50, maxHp: 50, atk: 6, def: 1, color: '#8B4513', joinedMap: 3, joined: false },
+  { id: 'ganon', name: '呪いのガノン', hp: 300, maxHp: 300, atk: 10, def: 6, color: '#800080', joinedMap: 4, joined: false }
+];
+
+// Current map
+let currentMap = 0;
+let camera = { x: 0, y: 0 };
+const TILE = 32;
+const MAP_COLS = 50;
+const MAP_ROWS = 37;
+
+// Enemies
+let enemies = [];
+let projectiles = [];
+let particles = [];
+let messages = [];
+let messageTimer = 0;
+
+// Skills
+const skillDefs = [
+  { name: 'ギガスラッシュ', type: 'active', mp: 20, desc: '強力な斬撃' },
+  { name: 'パワーアップ', type: 'passive', desc: 'ATK+5' },
+  { name: 'ガードアップ', type: 'passive', desc: 'DEF+3' },
+  { name: 'HPアップ', type: 'passive', desc: 'MaxHP+30' },
+  { name: 'MPアップ', type: 'passive', desc: 'MaxMP+20' },
+  { name: 'スピードアップ', type: 'passive', desc: '移動速度UP' },
+  { name: '回復', type: 'active', mp: 10, desc: 'HP20回復' },
+  { name: 'バリア', type: 'active', mp: 15, desc: 'ダメージ半減' },
+  { name: 'ダブルアタック', type: 'passive', desc: '2回攻撃' },
+  { name: '炎の剣', type: 'passive', desc: '炎ダメージ+' },
+  { name: '氷の剣', type: 'passive', desc: '凍結効果' },
+  { name: '雷の剣', type: 'passive', desc: '雷ダメージ+' },
+  { name: '回転斬り', type: 'active', mp: 12, desc: '周囲全体攻撃' },
+  { name: '矢の精霊', type: 'active', mp: 8, desc: '遠距離攻撃' },
+  { name: '仲間召喚', type: 'active', mp: 25, desc: '仲間がHP回復' }
+];
+
+let levelUpChoices = [];
+let pendingLevelUps = 0;
+
+// Input
+const keys = {};
+const prevKeys = {};
+document.addEventListener('keydown', e => {
+  if (!keys[e.code]) {
+    keys[e.code] = true;
+    if (gameState === 'title') startGame();
+    else if (gameState === 'charselect') handleCharSelect(e.code);
+    else if (gameState === 'game') handleGameKey(e.code);
+    else if (gameState === 'gameover' && e.code === 'Enter') restartFromMap();
+    else if (gameState === 'victory' && e.code === 'Enter') resetGame();
+    else if (gameState === 'levelup') handleLevelUp(e.code);
+    else if (gameState === 'skillpanel') {
+      if (e.code === 'Tab' || e.code === 'Escape') gameState = 'game';
+    }
+    else if (gameState === 'mapscreen') {
+      if (e.code === 'KeyM' || e.code === 'Escape' || e.code === 'Tab') gameState = 'game';
+    }
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ===== TILE TYPES =====
+const T = { GRASS: 0, TREE: 1, WATER: 2, BRIDGE: 3, STONE: 4, DARK: 5, WALL: 6, PATH: 7, SAND: 8, ROCK: 9, FLAG: 10 };
+
+// ===== MAP GENERATION =====
+function createMap(mapId) {
+  const cols = MAP_COLS, rows = MAP_ROWS;
+  let tiles = [];
+  for (let r = 0; r < rows; r++) {
+    tiles[r] = [];
+    for (let c = 0; c < cols; c++) {
+      tiles[r][c] = T.GRASS;
+    }
+  }
+
+  if (mapId === 0) {
+    // Starting Hill - grassy, path east, trees
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (r === 0 || r === rows-1) tiles[r][c] = T.TREE;
+        else if (c === 0) tiles[r][c] = T.TREE;
+        // Trees scattered
+        else if ((r % 6 === 1 && c % 7 === 2) || (r % 8 === 3 && c % 5 === 4)) tiles[r][c] = T.TREE;
+        // Path east
+        else if (r >= 16 && r <= 20 && c >= 30) tiles[r][c] = T.PATH;
+      }
+    }
+    tiles[18][49] = T.PATH; // exit east
+  } else if (mapId === 1) {
+    // Lost Forest - dense trees
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (r % 3 !== 1 || c % 4 !== 2) {
+          if ((r + c) % 5 < 2) tiles[r][c] = T.TREE;
+        }
+        // Path through forest - full width including exit
+        if (r >= 15 && r <= 21) tiles[r][c] = T.GRASS;
+      }
+    }
+    for (let r = 0; r < rows; r++) {
+      // Left/right borders but keep path rows open
+      if (r < 15 || r > 21) { tiles[r][0] = T.TREE; tiles[r][49] = T.TREE; }
+    }
+    // East exit: PATH tiles at cols 45-49 on path rows (visible corridor)
+    for (let r = 16; r <= 20; r++) for (let c = 45; c <= 48; c++) tiles[r][c] = T.PATH;
+  } else if (mapId === 2) {
+    // Zora River - water with bridge
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (c >= 20 && c <= 29) tiles[r][c] = T.WATER;
+        if (c >= 20 && c <= 29 && r >= 15 && r <= 21) tiles[r][c] = T.BRIDGE;
+      }
+    }
+    // East exit path
+    for (let r = 16; r <= 20; r++) for (let c = 45; c <= 48; c++) tiles[r][c] = T.PATH;
+  } else if (mapId === 3) {
+    // Rito Village - rocky elevated
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (r % 7 < 2 && c % 9 < 2) tiles[r][c] = T.ROCK;
+        if (r < 5 || r > rows-6) tiles[r][c] = T.STONE;
+      }
+    }
+    // East exit path (make sure no ROCK blocks)
+    for (let r = 16; r <= 20; r++) for (let c = 44; c <= 48; c++) tiles[r][c] = T.PATH;
+  } else if (mapId === 4) {
+    // Dark Castle
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        tiles[r][c] = T.DARK;
+        if (r === 0 || r === rows-1 || c === 0 || c === cols-1) tiles[r][c] = T.WALL;
+        if (r % 10 === 5 && c % 8 === 4 && r > 5 && r < rows-5 && c > 5 && c < cols-5) tiles[r][c] = T.WALL;
+      }
+    }
+    // Flag at far end
+    tiles[18][47] = T.FLAG;
+    tiles[18][46] = T.DARK;
+  }
+
+  return tiles;
+}
+
+// ===== NPC / COMPANION SPAWN DATA =====
+function getMapNPCs(mapId) {
+  if (mapId === 0) return [{ x: 200, y: 300, type: 'npc', name: '村人', msg: 'ここは始まりの丘だ。東の森へ続く道があるよ。矢印キーで移動、Zで攻撃だ！' }];
+  if (mapId === 1) return [{ x: 700, y: 300, type: 'zelda', name: 'ゼルダ', msg: '一緒に行くわ！' }];
+  if (mapId === 2) return [{ x: 950, y: 18 * 32 + 10, type: 'sid', name: 'シド', msg: 'シドも一緒に行くぞ！' }];
+  if (mapId === 3) return [{ x: 700, y: 300, type: 'churi', name: 'チューリ', msg: 'チューリもついて行くよ！' }];
+  return [];
+}
+
+function getMapEnemies(mapId) {
+  let list = [];
+  if (mapId === 1) {
+    for (let i = 0; i < 8; i++) {
+      list.push({ x: 200 + Math.random() * 800, y: 100 + Math.random() * 800, type: 'goblin', hp: 2, maxHp: 2, atk: 2, exp: 10, speed: 0.8, facing: 2, walkAnim: 0, invincible: 0, dead: false });
+    }
+  }
+  if (mapId === 2) {
+    for (let i = 0; i < 6; i++) {
+      list.push({ x: 300 + Math.random() * 700, y: 200 + Math.random() * 700, type: 'goblin', hp: 2, maxHp: 2, atk: 2, exp: 10, speed: 0.8, facing: 2, walkAnim: 0, invincible: 0, dead: false });
+    }
+  }
+  if (mapId === 3) {
+    for (let i = 0; i < 6; i++) {
+      list.push({ x: 200 + Math.random() * 900, y: 200 + Math.random() * 700, type: 'goblin', hp: 4, maxHp: 4, atk: 3, exp: 20, speed: 1.0, facing: 2, walkAnim: 0, invincible: 0, dead: false });
+    }
+  }
+  if (mapId === 4) {
+    // Curse Ganon boss
+    list.push({ x: 800, y: 580, type: 'curseGanon', hp: 200, maxHp: 200, atk: 9, exp: 200, speed: 0.7, facing: 2, walkAnim: 0, invincible: 0, dead: false, isBoss: true });
+    // Ganondorf final boss
+    list.push({ x: 1400, y: 580, type: 'ganondorf', hp: 350, maxHp: 350, atk: 13, exp: 500, speed: 0.5, facing: 2, walkAnim: 0, invincible: 0, dead: false, isBoss: true, active: false });
+  }
+  return list;
+}
+
+// Maps storage
+let maps = {};
+let npcs = [];
+
+function loadMap(mapId) {
+  if (!maps[mapId]) maps[mapId] = createMap(mapId);
+  currentMap = mapId;
+  npcs = getMapNPCs(mapId);
+  enemies = getMapEnemies(mapId);
+  projectiles = [];
+  // Position player at entry
+  if (mapId === 0) { player.x = 100; player.y = 18 * TILE + 16; }
+  else { player.x = 64; player.y = 18 * TILE; }
+}
+
+// ===== DRAW FUNCTIONS =====
+function drawTile(ctx, type, x, y) {
+  const s = TILE;
+  switch(type) {
+    case T.GRASS:
+      ctx.fillStyle = '#4a7c3f';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#3d6b34';
+      if ((Math.floor(x/s + y/s)) % 3 === 0) ctx.fillRect(x+2, y+2, 4, 4);
+      break;
+    case T.TREE:
+      ctx.fillStyle = '#2d5a1e';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#1a3a10';
+      ctx.fillRect(x+4, y+2, s-8, s-4);
+      ctx.fillStyle = '#4a2800';
+      ctx.fillRect(x+12, y+20, 8, 12);
+      break;
+    case T.WATER:
+      ctx.fillStyle = '#1a6b9a';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#2288bb';
+      ctx.fillRect(x+2, y+8, s-4, 4);
+      ctx.fillRect(x+4, y+20, s-8, 4);
+      break;
+    case T.BRIDGE:
+      ctx.fillStyle = '#8B6914';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#A0792A';
+      ctx.fillRect(x, y+4, s, 4);
+      ctx.fillRect(x, y+20, s, 4);
+      ctx.fillStyle = '#7A5A10';
+      for (let i = 0; i < 4; i++) ctx.fillRect(x + i*8, y, 4, s);
+      break;
+    case T.STONE:
+      ctx.fillStyle = '#888';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#aaa';
+      ctx.fillRect(x+2, y+2, 12, 8);
+      ctx.fillRect(x+16, y+12, 10, 8);
+      break;
+    case T.DARK:
+      ctx.fillStyle = '#1a0a2e';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#2a1040';
+      if ((Math.floor(x/s) + Math.floor(y/s)) % 2 === 0) ctx.fillRect(x+1, y+1, s-2, s-2);
+      break;
+    case T.WALL:
+      ctx.fillStyle = '#333';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#555';
+      ctx.fillRect(x, y, s, 4);
+      ctx.fillRect(x, y, 4, s);
+      break;
+    case T.PATH:
+      ctx.fillStyle = '#b8975a';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#a8855a';
+      ctx.fillRect(x+2, y+2, s-4, s-4);
+      break;
+    case T.SAND:
+      ctx.fillStyle = '#d4b483';
+      ctx.fillRect(x, y, s, s);
+      break;
+    case T.ROCK:
+      ctx.fillStyle = '#7a7a7a';
+      ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = '#909090';
+      ctx.fillRect(x+4, y+4, s-8, s-8);
+      break;
+    case T.FLAG:
+      ctx.fillStyle = '#2a0a4e';
+      ctx.fillRect(x, y, s, s);
+      // Draw Ganon flag
+      ctx.fillStyle = '#800080';
+      ctx.fillRect(x+8, y+2, 16, 20);
+      ctx.fillStyle = '#FF0000';
+      ctx.fillRect(x+12, y+6, 8, 8);
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(x+14, y+24, 4, 8);
+      break;
+    default:
+      ctx.fillStyle = '#4a7c3f';
+      ctx.fillRect(x, y, s, s);
+  }
+}
+
+function drawMap(tiles, camX, camY) {
+  const startC = Math.max(0, Math.floor(camX / TILE));
+  const endC = Math.min(MAP_COLS, Math.ceil((camX + 800) / TILE));
+  const startR = Math.max(0, Math.floor(camY / TILE));
+  const endR = Math.min(MAP_ROWS, Math.ceil((camY + 600) / TILE));
+  for (let r = startR; r < endR; r++) {
+    for (let c = startC; c < endC; c++) {
+      drawTile(ctx, tiles[r][c], c * TILE - camX, r * TILE - camY);
+    }
+  }
+}
+
+// ===== CHARACTER DRAWING =====
+function drawPlayer(x, y, charType, facing, walkAnim, attacking) {
+  const ct = charTypes[charType] || charTypes[0];
+  const bob = Math.sin(walkAnim * 0.3) * 2;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+
+  // Zelda (charType 4) - blue dress, blonde hair, bow
+  if (charType === 4) {
+    // Dress body
+    ctx.fillStyle = '#4169E1';
+    ctx.fillRect(ax - 8, ay - 12, 16, 18);
+    // Gold trim at top of dress
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(ax - 8, ay - 12, 16, 4);
+    // Legs
+    ctx.fillStyle = '#4169E1';
+    ctx.fillRect(ax - 6, ay + 6, 5, 10);
+    ctx.fillRect(ax + 1, ay + 6, 5, 10);
+    // Head
+    ctx.fillStyle = '#FDBCB4';
+    ctx.fillRect(ax - 7, ay - 24, 14, 14);
+    // Blonde long hair
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(ax - 7, ay - 24, 14, 6);
+    ctx.fillRect(ax - 8, ay - 22, 3, 14);
+    ctx.fillRect(ax + 5, ay - 22, 3, 14);
+    // Crown
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(ax - 4, ay - 26, 8, 3);
+    ctx.fillRect(ax - 2, ay - 28, 2, 3);
+    ctx.fillRect(ax, ay - 29, 2, 4);
+    ctx.fillRect(ax + 2, ay - 28, 2, 3);
+    // Eyes
+    ctx.fillStyle = '#333';
+    if (facing === 2) {
+      ctx.fillRect(ax - 4, ay - 16, 2, 2);
+      ctx.fillRect(ax + 2, ay - 16, 2, 2);
+    } else if (facing === 1) {
+      ctx.fillRect(ax + 2, ay - 17, 2, 2);
+    } else if (facing === 3) {
+      ctx.fillRect(ax - 4, ay - 17, 2, 2);
+    }
+    // Bow on side
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(ax + 10, ay - 8, 8, -Math.PI/2, Math.PI/2);
+    ctx.stroke();
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ax + 10, ay - 16);
+    ctx.lineTo(ax + 10, ay);
+    ctx.stroke();
+    if (attacking > 0) {
+      ctx.fillStyle = 'rgba(200,200,255,0.7)';
+      if (facing === 2) ctx.fillRect(ax - 20, ay + 10, 40, 30);
+      else if (facing === 0) ctx.fillRect(ax - 20, ay - 50, 40, 30);
+      else if (facing === 1) ctx.fillRect(ax + 10, ay - 20, 30, 40);
+      else ctx.fillRect(ax - 40, ay - 20, 30, 40);
+    }
+    return;
+  }
+
+  // Body
+  ctx.fillStyle = '#228B22'; // Green tunic
+  ctx.fillRect(ax - 8, ay - 12, 16, 18);
+
+  // Legs
+  ctx.fillStyle = ct.outfitColor;
+  ctx.fillRect(ax - 6, ay + 6, 5, 10);
+  ctx.fillRect(ax + 1, ay + 6, 5, 10);
+
+  // Head
+  ctx.fillStyle = '#FDBCB4';
+  ctx.fillRect(ax - 7, ay - 24, 14, 14);
+
+  // Hair
+  ctx.fillStyle = ct.hairColor;
+  if (ct.hair === 'long') {
+    ctx.fillRect(ax - 7, ay - 24, 14, 6);
+    ctx.fillRect(ax - 8, ay - 22, 3, 14);
+    ctx.fillRect(ax + 5, ay - 22, 3, 14);
+  } else if (ct.hair === 'twintail') {
+    ctx.fillRect(ax - 7, ay - 26, 14, 6);
+    ctx.fillRect(ax - 10, ay - 26, 4, 10);
+    ctx.fillRect(ax + 6, ay - 26, 4, 10);
+  } else if (ct.hair === 'short') {
+    ctx.fillRect(ax - 7, ay - 26, 14, 8);
+  } else { // spiky
+    ctx.fillRect(ax - 7, ay - 26, 14, 6);
+    ctx.fillRect(ax - 5, ay - 28, 4, 5);
+    ctx.fillRect(ax + 1, ay - 30, 4, 7);
+  }
+
+  // Eyes
+  ctx.fillStyle = '#333';
+  if (facing === 2) { // down
+    ctx.fillRect(ax - 4, ay - 16, 2, 2);
+    ctx.fillRect(ax + 2, ay - 16, 2, 2);
+  } else if (facing === 0) { // up
+    // back of head
+  } else if (facing === 1) { // right
+    ctx.fillRect(ax + 2, ay - 17, 2, 2);
+  } else { // left
+    ctx.fillRect(ax - 4, ay - 17, 2, 2);
+  }
+
+  // Sword
+  ctx.fillStyle = '#C0C0C0';
+  if (facing === 2) ctx.fillRect(ax + 8, ay - 8, 3, 20);
+  else if (facing === 0) ctx.fillRect(ax + 8, ay - 16, 3, 20);
+  else if (facing === 1) ctx.fillRect(ax + 8, ay - 10, 20, 3);
+  else ctx.fillRect(ax - 28, ay - 10, 20, 3);
+
+  if (attacking > 0) {
+    ctx.fillStyle = 'rgba(200,200,255,0.7)';
+    if (facing === 2) ctx.fillRect(ax - 20, ay + 10, 40, 30);
+    else if (facing === 0) ctx.fillRect(ax - 20, ay - 50, 40, 30);
+    else if (facing === 1) ctx.fillRect(ax + 10, ay - 20, 30, 40);
+    else ctx.fillRect(ax - 40, ay - 20, 30, 40);
+  }
+}
+
+function drawZelda(x, y, walkAnim) {
+  const bob = Math.sin(walkAnim * 0.3) * 1.5;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+  // Dress
+  ctx.fillStyle = '#4169E1';
+  ctx.fillRect(ax - 7, ay - 10, 14, 20);
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(ax - 7, ay - 10, 14, 4);
+  // Head
+  ctx.fillStyle = '#FDBCB4';
+  ctx.fillRect(ax - 6, ay - 22, 12, 14);
+  // Blonde hair
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(ax - 6, ay - 24, 12, 6);
+  ctx.fillRect(ax - 8, ay - 22, 3, 12);
+  ctx.fillRect(ax + 5, ay - 22, 3, 12);
+  // Crown
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(ax - 4, ay - 26, 8, 3);
+  ctx.fillRect(ax - 2, ay - 28, 2, 3);
+  ctx.fillRect(ax + 0, ay - 29, 2, 4);
+  ctx.fillRect(ax + 2, ay - 28, 2, 3);
+  // Eyes
+  ctx.fillStyle = '#333';
+  ctx.fillRect(ax - 3, ay - 16, 2, 2);
+  ctx.fillRect(ax + 1, ay - 16, 2, 2);
+  // Bow
+  ctx.strokeStyle = '#8B6914';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(ax + 10, ay - 8, 8, -Math.PI/2, Math.PI/2);
+  ctx.stroke();
+  // Bowstring
+  ctx.strokeStyle = '#ccc';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(ax + 10, ay - 16);
+  ctx.lineTo(ax + 10, ay);
+  ctx.stroke();
+}
+
+function drawSid(x, y, walkAnim) {
+  const bob = Math.sin(walkAnim * 0.3) * 1.5;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+  // Fish body
+  ctx.fillStyle = '#00BFFF';
+  ctx.fillRect(ax - 8, ay - 14, 16, 24);
+  // Fins
+  ctx.fillStyle = '#0080FF';
+  ctx.fillRect(ax - 12, ay - 8, 5, 10);
+  ctx.fillRect(ax + 7, ay - 8, 5, 10);
+  // Head
+  ctx.fillStyle = '#00DFFF';
+  ctx.fillRect(ax - 7, ay - 24, 14, 14);
+  // Markings
+  ctx.fillStyle = '#0055AA';
+  ctx.fillRect(ax - 5, ay - 10, 10, 3);
+  ctx.fillRect(ax - 5, ay - 5, 10, 3);
+  // Eyes
+  ctx.fillStyle = '#000080';
+  ctx.fillRect(ax - 4, ay - 18, 3, 3);
+  ctx.fillRect(ax + 1, ay - 18, 3, 3);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(ax - 3, ay - 18, 1, 1);
+  ctx.fillRect(ax + 2, ay - 18, 1, 1);
+}
+
+function drawChuri(x, y, walkAnim) {
+  const bob = Math.sin(walkAnim * 0.3) * 1.5;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+  // Body feathers
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(ax - 8, ay - 12, 16, 22);
+  // Wings
+  ctx.fillStyle = '#A0522D';
+  ctx.fillRect(ax - 14, ay - 10, 8, 16);
+  ctx.fillRect(ax + 6, ay - 10, 8, 16);
+  // Colorful wing tips
+  ctx.fillStyle = '#FF6347';
+  ctx.fillRect(ax - 14, ay - 2, 8, 4);
+  ctx.fillRect(ax + 6, ay - 2, 8, 4);
+  // Head
+  ctx.fillStyle = '#D2691E';
+  ctx.fillRect(ax - 6, ay - 24, 12, 14);
+  // Beak
+  ctx.fillStyle = '#FF8C00';
+  ctx.fillRect(ax - 2, ay - 16, 8, 6);
+  ctx.fillRect(ax, ay - 13, 6, 6);
+  // Eyes
+  ctx.fillStyle = '#333';
+  ctx.fillRect(ax - 4, ay - 20, 2, 2);
+  ctx.fillRect(ax + 2, ay - 20, 2, 2);
+  // Crest
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(ax - 2, ay - 28, 4, 6);
+  ctx.fillRect(ax - 4, ay - 26, 3, 4);
+  ctx.fillRect(ax + 1, ay - 26, 3, 4);
+}
+
+function drawCurseGanon(x, y, walkAnim, friendly) {
+  const bob = Math.sin(walkAnim * 0.3) * 1.5;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+  // Large body
+  ctx.fillStyle = friendly ? '#6B238E' : '#2a0a2a';
+  ctx.fillRect(ax - 14, ay - 18, 28, 30);
+  // Shoulders
+  ctx.fillStyle = friendly ? '#8B3AB4' : '#3a1040';
+  ctx.fillRect(ax - 18, ay - 16, 8, 14);
+  ctx.fillRect(ax + 10, ay - 16, 8, 14);
+  // Head
+  ctx.fillStyle = friendly ? '#7a3a9a' : '#1a0530';
+  ctx.fillRect(ax - 12, ay - 32, 24, 18);
+  // Horns
+  ctx.fillStyle = friendly ? '#DDA0DD' : '#600060';
+  ctx.fillRect(ax - 14, ay - 40, 5, 12);
+  ctx.fillRect(ax + 9, ay - 40, 5, 12);
+  // Eyes
+  ctx.fillStyle = friendly ? '#FFAAFF' : '#FF0000';
+  ctx.fillRect(ax - 7, ay - 26, 5, 5);
+  ctx.fillRect(ax + 2, ay - 26, 5, 5);
+  ctx.fillStyle = friendly ? '#fff' : '#FF6666';
+  ctx.fillRect(ax - 6, ay - 25, 2, 2);
+  ctx.fillRect(ax + 3, ay - 25, 2, 2);
+  // Mouth
+  ctx.fillStyle = friendly ? '#FF88FF' : '#880000';
+  ctx.fillRect(ax - 4, ay - 18, 8, 3);
+  // HP bar for boss
+  if (!friendly) {
+    const en = enemies.find(e => e.type === 'curseGanon' && !e.dead);
+    if (en) {
+      ctx.fillStyle = '#333';
+      ctx.fillRect(ax - 30, ay - 50, 60, 6);
+      ctx.fillStyle = '#f00';
+      ctx.fillRect(ax - 30, ay - 50, 60 * (en.hp / en.maxHp), 6);
+    }
+  }
+}
+
+function drawGanondorf(x, y, walkAnim) {
+  const bob = Math.sin(walkAnim * 0.3) * 1;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+  // Large dark body
+  ctx.fillStyle = '#1a0000';
+  ctx.fillRect(ax - 18, ay - 22, 36, 38);
+  // Armor plates
+  ctx.fillStyle = '#8B0000';
+  ctx.fillRect(ax - 18, ay - 22, 36, 6);
+  ctx.fillRect(ax - 16, ay - 10, 8, 22);
+  ctx.fillRect(ax + 8, ay - 10, 8, 22);
+  // Cape
+  ctx.fillStyle = '#600000';
+  ctx.fillRect(ax - 20, ay - 18, 40, 40);
+  ctx.fillStyle = '#1a0000';
+  ctx.fillRect(ax - 14, ay - 18, 28, 38);
+  // Head
+  ctx.fillStyle = '#2a1000';
+  ctx.fillRect(ax - 14, ay - 38, 28, 20);
+  // Hair/crown
+  ctx.fillStyle = '#8B0000';
+  ctx.fillRect(ax - 14, ay - 42, 28, 6);
+  ctx.fillRect(ax - 16, ay - 40, 5, 20);
+  ctx.fillRect(ax + 11, ay - 40, 5, 20);
+  // Eyes (glowing)
+  ctx.fillStyle = '#FF4400';
+  ctx.fillRect(ax - 7, ay - 32, 6, 6);
+  ctx.fillRect(ax + 1, ay - 32, 6, 6);
+  ctx.fillStyle = '#FFAA00';
+  ctx.fillRect(ax - 6, ay - 31, 3, 3);
+  ctx.fillRect(ax + 3, ay - 31, 3, 3);
+  // Jewel on forehead
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(ax - 2, ay - 38, 4, 4);
+  // HP bar
+  const en = enemies.find(e => e.type === 'ganondorf' && !e.dead);
+  if (en) {
+    ctx.fillStyle = '#333';
+    ctx.fillRect(ax - 40, ay - 60, 80, 8);
+    ctx.fillStyle = '#f00';
+    ctx.fillRect(ax - 40, ay - 60, 80 * (en.hp / en.maxHp), 8);
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ガノンドルフ', ax, ay - 64);
+  }
+}
+
+function drawGoblin(x, y, walkAnim) {
+  const bob = Math.sin(walkAnim * 0.3) * 2;
+  const ax = Math.floor(x), ay = Math.floor(y + bob);
+  // Body
+  ctx.fillStyle = '#5a8a2a';
+  ctx.fillRect(ax - 6, ay - 8, 12, 14);
+  // Head
+  ctx.fillStyle = '#4a7a1a';
+  ctx.fillRect(ax - 7, ay - 20, 14, 14);
+  // Ears
+  ctx.fillStyle = '#3a6a0a';
+  ctx.fillRect(ax - 11, ay - 18, 5, 8);
+  ctx.fillRect(ax + 6, ay - 18, 5, 8);
+  // Eyes
+  ctx.fillStyle = '#FF0000';
+  ctx.fillRect(ax - 4, ay - 15, 3, 3);
+  ctx.fillRect(ax + 1, ay - 15, 3, 3);
+  // Mouth
+  ctx.fillStyle = '#222';
+  ctx.fillRect(ax - 3, ay - 10, 6, 2);
+  // Weapon
+  ctx.fillStyle = '#8B6914';
+  ctx.fillRect(ax + 6, ay - 14, 2, 14);
+}
+
+// ===== NPC DRAWING =====
+function drawNPC(npc, camX, camY) {
+  const sx = npc.x - camX, sy = npc.y - camY;
+  if (npc.type === 'npc') {
+    ctx.fillStyle = '#FDBCB4';
+    ctx.fillRect(sx - 8, sy - 26, 14, 14);
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(sx - 8, sy - 28, 14, 6);
+    ctx.fillStyle = '#2244AA';
+    ctx.fillRect(sx - 7, sy - 12, 12, 18);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(sx - 4, sy - 20, 2, 2);
+    ctx.fillRect(sx + 2, sy - 20, 2, 2);
+  } else if (npc.type === 'zelda') {
+    drawZelda(sx, sy, frame);
+  } else if (npc.type === 'sid') {
+    drawSid(sx, sy, frame);
+  } else if (npc.type === 'churi') {
+    drawChuri(sx, sy, frame);
+  }
+  // Name tag
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(sx - 20, sy - 40, 40, 12);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(npc.name, sx, sy - 31);
+}
+
+// ===== ENEMY DRAWING =====
+function drawEnemy(en, camX, camY) {
+  if (en.dead) return;
+  const sx = en.x - camX, sy = en.y - camY;
+  if (sx < -60 || sx > 860 || sy < -60 || sy > 660) return;
+
+  if (en.invincible > 0 && en.invincible % 4 < 2) return; // flash
+
+  if (en.type === 'goblin') drawGoblin(sx, sy, en.walkAnim);
+  else if (en.type === 'curseGanon') drawCurseGanon(sx, sy, en.walkAnim, false);
+  else if (en.type === 'ganondorf') drawGanondorf(sx, sy, en.walkAnim);
+
+  // HP bar (small)
+  if (!en.isBoss) {
+    ctx.fillStyle = '#333';
+    ctx.fillRect(sx - 12, sy - 36, 24, 4);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(sx - 12, sy - 36, 24 * (en.hp / en.maxHp), 4);
+  }
+}
+
+// ===== COMPANION DRAWING =====
+function drawCompanion(comp, i, camX, camY) {
+  if (!comp.joined) return;
+  const spacing = 35;
+  const idx = Math.min((i + 1) * spacing, playerTrail.length - 1);
+  const pos = playerTrail[idx] || { x: player.x - (i+1)*30, y: player.y };
+  const sx = pos.x - camX, sy = pos.y - camY;
+  if (sx < -60 || sx > 860 || sy < -80 || sy > 680) return;
+  const wAnim = frame + i * 20;
+  if (comp.id === 'zelda') drawZelda(sx, sy, wAnim);
+  else if (comp.id === 'sid') drawSid(sx, sy, wAnim);
+  else if (comp.id === 'churi') drawChuri(sx, sy, wAnim);
+  else if (comp.id === 'ganon') drawCurseGanon(sx, sy, wAnim, true);
+  // Companion name tag
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(sx - 18, sy - 42, 36, 12);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = '8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(comp.name, sx, sy - 33);
+}
+
+// ===== PARTICLES =====
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 4,
+      vy: (Math.random() - 0.5) * 4,
+      life: 30 + Math.random() * 20,
+      color,
+      size: 2 + Math.random() * 4
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles(camX, camY) {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life / 50;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - camX - p.size/2, p.y - camY - p.size/2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ===== COLLISION =====
+function isSolid(tileType) {
+  return tileType === T.TREE || tileType === T.WALL || tileType === T.WATER || tileType === T.ROCK;
+}
+
+function getTileAt(wx, wy) {
+  const col = Math.floor(wx / TILE);
+  const row = Math.floor(wy / TILE);
+  if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) return T.WALL;
+  const tiles = maps[currentMap];
+  return tiles[row][col];
+}
+
+function moveWithCollision(obj, dx, dy, radius) {
+  const r = radius || 10;
+  // Try X
+  let nx = obj.x + dx;
+  if (!isSolid(getTileAt(nx - r, obj.y)) && !isSolid(getTileAt(nx + r, obj.y)) &&
+      !isSolid(getTileAt(nx - r, obj.y - r*2)) && !isSolid(getTileAt(nx + r, obj.y - r*2))) {
+    obj.x = nx;
+  }
+  // Try Y
+  let ny = obj.y + dy;
+  if (!isSolid(getTileAt(obj.x - r, ny)) && !isSolid(getTileAt(obj.x + r, ny)) &&
+      !isSolid(getTileAt(obj.x - r, ny - r*2)) && !isSolid(getTileAt(obj.x + r, ny - r*2))) {
+    obj.y = ny;
+  }
+}
+
+// ===== PLAYER MOVEMENT =====
+function updatePlayer() {
+  if (player.attacking > 0) player.attacking--;
+  if (player.invincible > 0) player.invincible--;
+
+  let dx = 0, dy = 0;
+  const spd = player.speed * (player.skills.includes(5) ? 1.4 : 1);
+  if (keys['ArrowLeft'] || keys['KeyA']) { dx -= spd; player.facing = 3; }
+  if (keys['ArrowRight'] || keys['KeyD']) { dx += spd; player.facing = 1; }
+  if (keys['ArrowUp'] || keys['KeyW']) { dy -= spd; player.facing = 0; }
+  if (keys['ArrowDown'] || keys['KeyS']) { dy += spd; player.facing = 2; }
+
+  if (dx !== 0 || dy !== 0) {
+    player.walkAnim++;
+    moveWithCollision(player, dx, dy, 10);
+  }
+
+  // Clamp to map
+  player.x = Math.max(16, Math.min(MAP_COLS * TILE - 16, player.x));
+  player.y = Math.max(32, Math.min(MAP_ROWS * TILE - 16, player.y));
+
+  // Update player trail for companion following
+  playerTrail.unshift({ x: player.x, y: player.y });
+  if (playerTrail.length > 400) playerTrail.pop();
+
+  // Camera
+  camera.x = Math.max(0, Math.min(MAP_COLS * TILE - 800, player.x - 400));
+  camera.y = Math.max(0, Math.min(MAP_ROWS * TILE - 600, player.y - 300));
+
+  // Map transitions
+  checkMapTransition();
+
+  // Interact
+  checkPlayerTile();
+}
+
+function checkMapTransition() {
+  // Walk off right edge → next map
+  if (player.x > MAP_COLS * TILE - 50) {
+    if (currentMap < 4) {
+      if (currentMap === 0) hillClearBanner = 200;
+      loadMap(currentMap + 1);
+      player.x = 40;
+    }
+  }
+  if (player.x < 20) {
+    if (currentMap > 0) {
+      loadMap(currentMap - 1);
+      player.x = MAP_COLS * TILE - 50;
+    }
+  }
+}
+
+function checkPlayerTile() {
+  const t = getTileAt(player.x, player.y);
+  if (t === T.FLAG) {
+    checkGanondorfDefeated();
+  }
+}
+
+function checkGanondorfDefeated() {
+  const boss = enemies.find(e => e.type === 'ganondorf');
+  if (!boss || boss.dead) {
+    // Victory!
+    gameState = 'victory';
+  } else {
+    showMessage('ガノンドルフを倒さないと、この先へは進めない！');
+  }
+}
+
+// ===== COMBAT =====
+function handleGameKey(code) {
+  if (code === 'KeyZ' || code === 'Space') {
+    playerAttack();
+  } else if (code === 'KeyX') {
+    gigaSlash();
+  } else if (code === 'KeyC') {
+    useActiveSkill();
+  } else if (code === 'Enter') {
+    tryInteract();
+  } else if (code === 'KeyM') {
+    gameState = 'mapscreen';
+  } else if (code === 'Tab' || code === 'Escape') {
+    if (gameState === 'game') gameState = 'skillpanel';
+    else if (gameState === 'skillpanel') gameState = 'game';
+  }
+}
+
+function playerAttack() {
+  if (player.attacking > 0) return;
+  player.attacking = 20;
+  player.attackDir = player.facing;
+  spawnParticles(player.x, player.y, '#aaf', 5);
+
+  let hits = 0;
+  for (const en of enemies) {
+    if (en.dead || en.invincible > 0) continue;
+    if (currentMap === 4 && en.type === 'ganondorf') {
+      const cg = enemies.find(e => e.type === 'curseGanon');
+      if (cg && !cg.dead) { showMessage('まず呪いのガノンを倒せ！'); continue; }
+    }
+    if (isInAttackRange(player, en)) {
+      dealDamage(en, player.atk + (player.skills.includes(9) ? 3 : 0) + (player.skills.includes(11) ? 3 : 0));
+      hits++;
+      if (player.skills.includes(8) && hits <= 1) {
+        setTimeout(() => dealDamage(en, player.atk), 200);
+      }
+    }
+  }
+}
+
+function isInAttackRange(attacker, target) {
+  const dx = target.x - attacker.x;
+  const dy = target.y - attacker.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist > 60) return false;
+
+  const dir = attacker.facing || attacker.attackDir;
+  if (dir === 0 && dy < -5) return true;
+  if (dir === 1 && dx > 5) return true;
+  if (dir === 2 && dy > 5) return true;
+  if (dir === 3 && dx < -5) return true;
+  return false;
+}
+
+function dealDamage(en, dmg) {
+  if (en.dead || en.invincible > 0) return;
+  const actualDmg = Math.max(1, dmg - Math.floor(Math.random() * 2));
+  en.hp -= actualDmg;
+  en.invincible = 30;
+  spawnParticles(en.x, en.y, '#f88', 8);
+  showFloatingText(en.x, en.y, '-' + actualDmg, '#f88');
+
+  if (en.hp <= 0) {
+    en.dead = true;
+    en.hp = 0;
+    spawnParticles(en.x, en.y, '#FFD700', 20);
+    gainEXP(en.exp);
+    if (en.type === 'curseGanon') {
+      onCurseGanonDefeated();
+    }
+    if (en.type === 'ganondorf') {
+      showMessage('ガノンドルフを倒した！旗に触れよ！');
+    }
+  }
+}
+
+function onCurseGanonDefeated() {
+  showMessage('呪いのガノンの呪いが解けた！仲間になった！');
+  const comp = companionDefs.find(c => c.id === 'ganon');
+  if (comp && !comp.joined) {
+    comp.joined = true;
+    companions = companionDefs.filter(c => c.joined);
+  }
+  // Activate Ganondorf
+  const gd = enemies.find(e => e.type === 'ganondorf');
+  if (gd) gd.active = true;
+}
+
+function gigaSlash() {
+  if (!player.skills.includes(0)) { showMessage('ギガスラッシュを習得していない！'); return; }
+  if (player.mp < 20) { showMessage('MPが足りない！'); return; }
+  player.mp -= 20;
+  player.attacking = 30;
+  spawnParticles(player.x, player.y, '#88f', 20);
+
+  for (const en of enemies) {
+    if (en.dead) continue;
+    if (currentMap === 4 && en.type === 'ganondorf') {
+      const cg = enemies.find(e => e.type === 'curseGanon');
+      if (cg && !cg.dead) continue;
+    }
+    const dx = en.x - player.x, dy = en.y - player.y;
+    if (Math.sqrt(dx*dx + dy*dy) < 80) {
+      dealDamage(en, player.atk * 2 + 10);
+    }
+  }
+}
+
+function useActiveSkill() {
+  // Use first active skill that's unlocked (excluding 0)
+  const activeSkills = [6, 7, 12, 13, 14];
+  for (const si of activeSkills) {
+    if (player.skills.includes(si)) {
+      const sk = skillDefs[si];
+      if (player.mp < sk.mp) continue;
+      player.mp -= sk.mp;
+      if (si === 6) { // Heal
+        const heal = 20;
+        player.hp = Math.min(player.maxHp, player.hp + heal);
+        spawnParticles(player.x, player.y, '#0f0', 10);
+        showMessage('回復！HP+' + heal);
+      } else if (si === 7) { // Barrier
+        player.activeEffects.barrier = 300;
+        showMessage('バリアを張った！');
+        spawnParticles(player.x, player.y, '#88f', 15);
+      } else if (si === 12) { // Spin slash
+        spawnParticles(player.x, player.y, '#ff8', 20);
+        for (const en of enemies) {
+          if (en.dead) continue;
+          const dx = en.x - player.x, dy = en.y - player.y;
+          if (Math.sqrt(dx*dx + dy*dy) < 64) dealDamage(en, player.atk + 5);
+        }
+        showMessage('回転斬り！');
+      } else if (si === 13) { // Spirit arrow
+        fireArrow();
+        showMessage('矢の精霊！');
+      } else if (si === 14) { // Summon companion
+        for (const c of companions) {
+          if (c.joined) {
+            c.hp = Math.min(c.maxHp, c.hp + 20);
+          }
+        }
+        player.hp = Math.min(player.maxHp, player.hp + 15);
+        spawnParticles(player.x, player.y, '#FFD700', 15);
+        showMessage('仲間が力を貸してくれた！HP回復！');
+      }
+      return;
+    }
+  }
+  showMessage('使えるスキルがない！');
+}
+
+function fireArrow() {
+  const dirs = [[0,-1],[1,0],[0,1],[-1,0]];
+  const d = dirs[player.facing];
+  projectiles.push({ x: player.x, y: player.y, vx: d[0]*8, vy: d[1]*8, dmg: player.atk + 8, life: 60, type: 'arrow' });
+}
+
+function tryInteract() {
+  for (const npc of npcs) {
+    const dx = npc.x - player.x, dy = npc.y - player.y;
+    if (Math.sqrt(dx*dx + dy*dy) < 50) {
+      showMessage(npc.name + '：' + npc.msg);
+      // Join companion
+      if (['zelda','sid','churi'].includes(npc.type)) {
+        const comp = companionDefs.find(c => c.id === npc.type);
+        if (comp && !comp.joined) {
+          comp.joined = true;
+          companions = companionDefs.filter(c => c.joined);
+          npcs.splice(npcs.indexOf(npc), 1);
+        }
+      }
+      return;
+    }
+  }
+  // Auto message if close to NPC
+}
+
+function tryAutoInteract() {
+  for (const npc of npcs) {
+    const dx = npc.x - player.x, dy = npc.y - player.y;
+    if (Math.sqrt(dx*dx+dy*dy) < 40) {
+      const comp = companionDefs.find(c => c.id === npc.type);
+      if (comp && !comp.joined && ['zelda','sid','churi'].includes(npc.type)) {
+        showMessage(npc.name + '：' + npc.msg);
+        comp.joined = true;
+        companions = companionDefs.filter(c => c.joined);
+        npcs.splice(npcs.indexOf(npc), 1);
+        return;
+      }
+    }
+  }
+}
+
+// ===== ENEMY AI =====
+function updateEnemies() {
+  for (const en of enemies) {
+    if (en.dead) continue;
+    if (en.type === 'ganondorf' && !en.active) continue;
+    if (en.invincible > 0) en.invincible--;
+    en.walkAnim++;
+
+    const dx = player.x - en.x;
+    const dy = player.y - en.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    if (dist < 400) {
+      const nx = dx / dist * en.speed;
+      const ny = dy / dist * en.speed;
+      moveWithCollision(en, nx, ny, 12);
+
+      // Damage player on contact
+      if (dist < 28 && player.invincible === 0) {
+        let dmg = en.atk - player.def;
+        if (player.activeEffects.barrier) dmg = Math.floor(dmg / 2);
+        dmg = Math.max(1, dmg);
+        player.hp -= dmg;
+        player.invincible = 60;
+        spawnParticles(player.x, player.y, '#f00', 8);
+        showFloatingText(player.x, player.y, '-' + dmg, '#f00');
+        if (player.hp <= 0) {
+          player.hp = 0;
+          gameState = 'gameover';
+        }
+      }
+    }
+  }
+}
+
+// ===== ZELDA COMPANION ATTACKS =====
+function updateCompanionAttacks() {
+  const zelda = companions.find(c => c.id === 'zelda' && c.joined);
+  if (!zelda) return;
+  if (!zelda.atkCd) zelda.atkCd = 120;
+  zelda.atkCd--;
+  if (zelda.atkCd > 0) return;
+
+  // Find nearest enemy within 250px of player
+  let nearest = null, nearestDist = 250;
+  for (const en of enemies) {
+    if (en.dead) continue;
+    if (currentMap === 4 && en.type === 'ganondorf') {
+      const cg = enemies.find(e => e.type === 'curseGanon');
+      if (cg && !cg.dead) continue;
+    }
+    const dx = en.x - player.x, dy = en.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < nearestDist) { nearest = en; nearestDist = dist; }
+  }
+  if (!nearest) return;
+
+  // Get Zelda's position from trail
+  const idx = Math.min(35, playerTrail.length - 1);
+  const zpos = playerTrail[idx] || { x: player.x - 35, y: player.y };
+  const dx = nearest.x - zpos.x, dy = nearest.y - zpos.y;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  projectiles.push({
+    x: zpos.x, y: zpos.y,
+    vx: dx / len * 6, vy: dy / len * 6,
+    dmg: 8, life: 80, type: 'zeldaArrow'
+  });
+  spawnParticles(zpos.x, zpos.y, '#88aaFF', 4);
+  zelda.atkCd = 120;
+}
+
+function updateProjectiles() {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    if (p.life <= 0) { projectiles.splice(i, 1); continue; }
+    if (isSolid(getTileAt(p.x, p.y))) { projectiles.splice(i, 1); continue; }
+    for (const en of enemies) {
+      if (en.dead) continue;
+      if (Math.abs(en.x - p.x) < 16 && Math.abs(en.y - p.y) < 16) {
+        dealDamage(en, p.dmg);
+        projectiles.splice(i, 1);
+        break;
+      }
+    }
+  }
+}
+
+// ===== FLOATING TEXT =====
+let floatingTexts = [];
+function showFloatingText(wx, wy, text, color) {
+  floatingTexts.push({ x: wx, y: wy, text, color, life: 60 });
+}
+
+function updateFloatingTexts() {
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    floatingTexts[i].y -= 0.5;
+    floatingTexts[i].life--;
+    if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+  }
+}
+
+function drawFloatingTexts(camX, camY) {
+  for (const ft of floatingTexts) {
+    ctx.globalAlpha = ft.life / 60;
+    ctx.fillStyle = ft.color;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, ft.x - camX, ft.y - camY);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ===== MESSAGES =====
+let messageQueue = [];
+let currentMessage = null;
+let msgDisplayTime = 0;
+
+function showMessage(text) {
+  messageQueue.push(text);
+}
+
+function updateMessages() {
+  if (currentMessage && msgDisplayTime > 0) {
+    msgDisplayTime--;
+    if (msgDisplayTime <= 0) currentMessage = null;
+  }
+  if (!currentMessage && messageQueue.length > 0) {
+    currentMessage = messageQueue.shift();
+    msgDisplayTime = 180;
+  }
+}
+
+function drawMessage() {
+  if (!currentMessage) return;
+  ctx.fillStyle = 'rgba(0,0,30,0.85)';
+  ctx.fillRect(60, 460, 680, 60);
+  ctx.strokeStyle = '#88aaff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(60, 460, 680, 60);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(currentMessage, 80, 498);
+}
+
+// ===== EXP/LEVEL =====
+function gainEXP(amount) {
+  player.exp += amount;
+  showFloatingText(player.x, player.y, '+' + amount + 'EXP', '#FFD700');
+  checkLevelUp();
+}
+
+function checkLevelUp() {
+  while (player.exp >= player.expNext) {
+    player.exp -= player.expNext;
+    player.level++;
+    player.expNext = Math.floor(player.expNext * 1.5);
+    player.hp = Math.min(player.maxHp, player.hp + 20);
+    player.mp = Math.min(player.maxMp, player.mp + 10);
+    pendingLevelUps++;
+    spawnParticles(player.x, player.y, '#FFD700', 30);
+  }
+  if (pendingLevelUps > 0 && gameState === 'game') {
+    offerLevelUpSkill();
+  }
+}
+
+function offerLevelUpSkill() {
+  if (pendingLevelUps <= 0) return;
+  pendingLevelUps--;
+  // Pick 2 random unlearned skills
+  const available = [];
+  for (let i = 1; i < skillDefs.length; i++) {
+    if (!player.skills.includes(i)) available.push(i);
+  }
+  if (available.length === 0) {
+    // All learned, just boost stats
+    player.atk++;
+    player.maxHp += 10;
+    player.hp = Math.min(player.maxHp, player.hp + 10);
+    showMessage('レベルアップ！全スキル習得済み。ステータスが上昇した！');
+    return;
+  }
+  // Shuffle and pick 2
+  for (let i = available.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [available[i], available[j]] = [available[j], available[i]];
+  }
+  levelUpChoices = available.slice(0, Math.min(2, available.length));
+  gameState = 'levelup';
+}
+
+function handleLevelUp(code) {
+  if (code === 'Digit1' || code === 'Numpad1') selectSkill(0);
+  else if (code === 'Digit2' || code === 'Numpad2') selectSkill(1);
+}
+
+function selectSkill(index) {
+  if (index >= levelUpChoices.length) return;
+  const si = levelUpChoices[index];
+  player.skills.push(si);
+
+  // Apply passive effects immediately
+  if (si === 1) player.atk += 5;
+  if (si === 2) player.def += 3;
+  if (si === 3) { player.maxHp += 30; player.hp = Math.min(player.maxHp, player.hp + 30); }
+  if (si === 4) { player.maxMp += 20; player.mp = Math.min(player.maxMp, player.mp + 20); }
+
+  showMessage('スキル習得：' + skillDefs[si].name + '！');
+  gameState = 'game';
+  if (pendingLevelUps > 0) {
+    setTimeout(() => offerLevelUpSkill(), 500);
+  }
+}
+
+// ===== MP REGEN =====
+function updateRegen() {
+  if (frame % 120 === 0) {
+    player.mp = Math.min(player.maxMp, player.mp + 1);
+  }
+  if (player.activeEffects.barrier) {
+    player.activeEffects.barrier--;
+    if (player.activeEffects.barrier <= 0) {
+      delete player.activeEffects.barrier;
+      showMessage('バリアが切れた');
+    }
+  }
+}
+
+// ===== UI DRAWING =====
+function drawUI() {
+  const uiY = 530;
+  ctx.fillStyle = 'rgba(0,0,20,0.8)';
+  ctx.fillRect(0, uiY - 10, 800, 80);
+  ctx.strokeStyle = '#446688';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0, uiY - 10, 800, 80);
+
+  // HP bar
+  ctx.fillStyle = '#333';
+  ctx.fillRect(10, uiY, 160, 14);
+  ctx.fillStyle = '#cc2222';
+  ctx.fillRect(10, uiY, 160 * (player.hp / player.maxHp), 14);
+  ctx.strokeStyle = '#ff4444';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(10, uiY, 160, 14);
+  ctx.fillStyle = '#fff';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('HP ' + player.hp + '/' + player.maxHp, 14, uiY + 11);
+
+  // MP bar
+  ctx.fillStyle = '#333';
+  ctx.fillRect(10, uiY + 18, 160, 14);
+  ctx.fillStyle = '#2244cc';
+  ctx.fillRect(10, uiY + 18, 160 * (player.mp / player.maxMp), 14);
+  ctx.strokeStyle = '#4466ff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(10, uiY + 18, 160, 14);
+  ctx.fillStyle = '#fff';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('MP ' + player.mp + '/' + player.maxMp, 14, uiY + 29);
+
+  // Barrier indicator
+  if (player.activeEffects.barrier) {
+    ctx.fillStyle = '#88aaff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('バリア中', 10, uiY + 50);
+  }
+
+  // Center: name, level, exp
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(player.name + '  Lv.' + player.level, 400, uiY + 12);
+
+  ctx.fillStyle = '#333';
+  ctx.fillRect(300, uiY + 16, 200, 10);
+  ctx.fillStyle = '#88ddff';
+  ctx.fillRect(300, uiY + 16, 200 * (player.exp / player.expNext), 10);
+  ctx.strokeStyle = '#aaddff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(300, uiY + 16, 200, 10);
+  ctx.fillStyle = '#fff';
+  ctx.font = '10px sans-serif';
+  ctx.fillText('EXP ' + player.exp + '/' + player.expNext, 400, uiY + 25);
+
+  ctx.fillStyle = '#ccc';
+  ctx.font = '10px sans-serif';
+  ctx.fillText('Z:攻撃 X:ギガ C:スキル Enter:話す Tab:スキル M:地図', 400, uiY + 42);
+  ctx.fillText('マップ: ' + ['始まりの丘','迷いの森','ゾーラ川','リトの村','闇の城'][currentMap], 400, uiY + 56);
+
+  // Right: companions
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#FFD700';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('仲間:', 790, uiY + 10);
+  const joined = companionDefs.filter(c => c.joined);
+  for (let i = 0; i < joined.length; i++) {
+    ctx.fillStyle = ['#4169E1','#00BFFF','#8B4513','#800080'][['zelda','sid','churi','ganon'].indexOf(joined[i].id)];
+    ctx.fillText(joined[i].name, 790, uiY + 22 + i * 12);
+  }
+}
+
+// ===== MISSION GUIDE =====
+function getMissionText() {
+  if (currentMap === 0) return ['ミッション', '→ 東へ進め！', '(迷いの森へ)'];
+  if (currentMap === 1) {
+    const z = companionDefs.find(c => c.id === 'zelda');
+    if (!z || !z.joined) return ['ミッション', '→ ゼルダを探せ！', '(東の端にいる)'];
+    return ['ミッション', '→ 東へ進め！', '(ゾーラ川へ)'];
+  }
+  if (currentMap === 2) {
+    const s = companionDefs.find(c => c.id === 'sid');
+    if (!s || !s.joined) return ['ミッション', '→ シドを探せ！', '(橋を渡った先)'];
+    return ['ミッション', '→ 東へ進め！', '(リトの村へ)'];
+  }
+  if (currentMap === 3) {
+    const ch = companionDefs.find(c => c.id === 'churi');
+    if (!ch || !ch.joined) return ['ミッション', '→ チューリを探せ！', '(東の端にいる)'];
+    return ['ミッション', '→ 東へ進め！', '(闇の城へ)'];
+  }
+  if (currentMap === 4) {
+    const cg = enemies.find(e => e.type === 'curseGanon');
+    const gd = enemies.find(e => e.type === 'ganondorf');
+    if (cg && !cg.dead) return ['ミッション', '→ 呪いのガノン', 'を倒せ！ HP:' + (cg ? cg.hp : '?')];
+    if (gd && !gd.dead) return ['ミッション', '→ ガノンドルフ', 'を倒せ！ HP:' + (gd ? gd.hp : '?')];
+    return ['ミッション', '→ ガノンの旗に', '触れよ！'];
+  }
+  return ['', '', ''];
+}
+
+function drawMission() {
+  const lines = getMissionText();
+  const x = 610, y = 10, w = 180, h = 62;
+  ctx.fillStyle = 'rgba(0,0,30,0.82)';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(lines[0], x + 6, y + 14);
+  ctx.fillStyle = '#fff';
+  ctx.font = '11px sans-serif';
+  ctx.fillText(lines[1], x + 6, y + 30);
+  ctx.fillStyle = '#aaddff';
+  ctx.fillText(lines[2], x + 6, y + 46);
+}
+
+// ===== HILL CLEAR BANNER =====
+function drawHillClearBanner() {
+  if (hillClearBanner <= 0) return;
+  hillClearBanner--;
+  const alpha = hillClearBanner > 160 ? (200 - hillClearBanner) / 40 :
+                hillClearBanner < 40 ? hillClearBanner / 40 : 1;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,30,0.7)';
+  ctx.fillRect(100, 200, 600, 140);
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(100, 200, 600, 140);
+  ctx.fillStyle = '#FFD700';
+  ctx.shadowColor = '#FF8800';
+  ctx.shadowBlur = 25;
+  ctx.font = 'bold 56px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ゼドラの伝説', 400, 275);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#aaddff';
+  ctx.font = '20px sans-serif';
+  ctx.fillText('〜 新たな冒険が始まる 〜', 400, 320);
+  ctx.globalAlpha = 1;
+}
+
+// ===== SKILL PANEL =====
+function drawSkillPanel() {
+  ctx.fillStyle = 'rgba(0,0,30,0.95)';
+  ctx.fillRect(50, 50, 700, 500);
+  ctx.strokeStyle = '#4488ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(50, 50, 700, 500);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('スキルパネル [Tab/Escで閉じる]', 400, 80);
+
+  for (let i = 0; i < 15; i++) {
+    const col = i % 5;
+    const row = Math.floor(i / 5);
+    const x = 80 + col * 132;
+    const y = 100 + row * 130;
+    const learned = player.skills.includes(i);
+
+    ctx.fillStyle = learned ? 'rgba(20,60,100,0.9)' : 'rgba(20,20,20,0.9)';
+    ctx.fillRect(x, y, 120, 110);
+    ctx.strokeStyle = learned ? '#4488ff' : '#334';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, 120, 110);
+
+    ctx.fillStyle = learned ? '#FFD700' : '#666';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(skillDefs[i].name, x + 60, y + 20);
+
+    ctx.fillStyle = learned ? '#aaf' : '#444';
+    ctx.font = '10px sans-serif';
+    ctx.fillText(skillDefs[i].desc, x + 60, y + 38);
+
+    if (skillDefs[i].type === 'active') {
+      ctx.fillStyle = learned ? '#88ddff' : '#336';
+      ctx.fillText('MP:' + skillDefs[i].mp, x + 60, y + 52);
+    } else {
+      ctx.fillStyle = learned ? '#88ff88' : '#363';
+      ctx.fillText('パッシブ', x + 60, y + 52);
+    }
+
+    if (learned) {
+      ctx.fillStyle = '#0f0';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('習得済み', x + 60, y + 68);
+    }
+
+    ctx.fillStyle = '#666';
+    ctx.font = '9px sans-serif';
+    ctx.fillText('No.' + i, x + 60, y + 84);
+  }
+}
+
+// ===== LEVEL UP SCREEN =====
+function drawLevelUpScreen() {
+  ctx.fillStyle = 'rgba(0,0,50,0.95)';
+  ctx.fillRect(150, 150, 500, 300);
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(150, 150, 500, 300);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('レベルアップ！ Lv.' + player.level, 400, 200);
+  ctx.fillStyle = '#fff';
+  ctx.font = '18px sans-serif';
+  ctx.fillText('スキルを選んでください', 400, 230);
+
+  for (let i = 0; i < levelUpChoices.length; i++) {
+    const si = levelUpChoices[i];
+    const sk = skillDefs[si];
+    const y = 260 + i * 90;
+    ctx.fillStyle = 'rgba(20,60,120,0.9)';
+    ctx.fillRect(180, y, 440, 75);
+    ctx.strokeStyle = '#88aaff';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(180, y, 440, 75);
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText((i+1) + '：' + sk.name, 400, y + 22);
+    ctx.fillStyle = '#ccc';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(sk.desc + (sk.mp ? '  MP:' + sk.mp : '  パッシブ'), 400, y + 42);
+  }
+
+  ctx.fillStyle = '#88aaff';
+  ctx.font = '14px sans-serif';
+  ctx.fillText('[1] または [2] キーで選択', 400, 420);
+}
+
+// ===== CHARACTER SELECT =====
+function drawCharSelect() {
+  ctx.fillStyle = '#0a0a2a';
+  ctx.fillRect(0, 0, 800, 600);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 32px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('キャラクター選択', 400, 60);
+  ctx.fillStyle = '#ccc';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('← → で選択、Enterで決定', 400, 95);
+
+  for (let i = 0; i < 5; i++) {
+    const ct = charTypes[i];
+    const xs = [100, 240, 400, 560, 700];
+    const x = xs[i];
+    const y = 280;
+    const selected = i === selectedChar;
+
+    ctx.fillStyle = selected ? 'rgba(40,80,160,0.9)' : 'rgba(10,10,40,0.9)';
+    ctx.fillRect(x - 50, y - 140, 100, 200);
+    ctx.strokeStyle = selected ? '#FFD700' : '#446688';
+    ctx.lineWidth = selected ? 3 : 1;
+    ctx.strokeRect(x - 50, y - 140, 100, 200);
+
+    // Draw character preview (larger)
+    ctx.save();
+    ctx.translate(x, y - 40);
+    ctx.scale(2, 2);
+    if (i === 4) {
+      // Zelda preview
+      drawZelda(0, 0, frame);
+    } else {
+      // Body
+      ctx.fillStyle = '#228B22';
+      ctx.fillRect(-8, -12, 16, 18);
+      ctx.fillStyle = ct.outfitColor;
+      ctx.fillRect(-6, 6, 5, 10);
+      ctx.fillRect(1, 6, 5, 10);
+      ctx.fillStyle = '#FDBCB4';
+      ctx.fillRect(-7, -24, 14, 14);
+      ctx.fillStyle = ct.hairColor;
+      if (ct.hair === 'long') {
+        ctx.fillRect(-7, -24, 14, 6);
+        ctx.fillRect(-8, -22, 3, 14);
+        ctx.fillRect(5, -22, 3, 14);
+      } else if (ct.hair === 'twintail') {
+        ctx.fillRect(-7, -26, 14, 6);
+        ctx.fillRect(-10, -26, 4, 10);
+        ctx.fillRect(6, -26, 4, 10);
+      } else if (ct.hair === 'short') {
+        ctx.fillRect(-7, -26, 14, 8);
+      } else {
+        ctx.fillRect(-7, -26, 14, 6);
+        ctx.fillRect(-5, -28, 4, 5);
+        ctx.fillRect(1, -30, 4, 7);
+      }
+      ctx.fillStyle = '#333';
+      ctx.fillRect(-4, -16, 2, 2);
+      ctx.fillRect(2, -16, 2, 2);
+      ctx.fillStyle = '#C0C0C0';
+      ctx.fillRect(8, -8, 3, 20);
+    }
+    ctx.restore();
+
+    ctx.fillStyle = selected ? '#FFD700' : '#aaa';
+    ctx.font = selected ? 'bold 16px sans-serif' : '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ct.name, x, y + 30);
+    ctx.fillStyle = '#888';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(ct.gender === 'female' ? '♀' : '♂', x, y + 50);
+  }
+}
+
+function handleCharSelect(code) {
+  if (code === 'ArrowLeft') selectedChar = (selectedChar + 4) % 5;
+  else if (code === 'ArrowRight') selectedChar = (selectedChar + 1) % 5;
+  else if (code === 'Enter') {
+    player.charType = selectedChar;
+    const ct = charTypes[selectedChar];
+    player.name = ct.gender === 'female' ? 'リントン' : 'リントン';
+    startCutscene();
+  }
+}
+
+// ===== CUTSCENE =====
+let cutscenePartner = null;
+function startCutscene() {
+  gameState = 'cutscene';
+  cutsceneStep = 0;
+  cutsceneTimer = 0;
+  cutsceneFlash = 0;
+  cutsceneBlack = 0;
+  cutsceneTextAlpha = 0;
+  dragonX = 1000;
+  dragonY = -100;
+  shieldAlpha = 0;
+  partnerX = 520;
+  playerCutX = 280;
+  fireBreathAlpha = 0;
+  dragonRoarSize = 0;
+  // Partner is opposite gender
+  const myGender = charTypes[player.charType].gender;
+  if (myGender === 'female') {
+    cutscenePartner = charTypes[2]; // older brother
+  } else {
+    cutscenePartner = charTypes[0]; // older sister
+  }
+}
+
+function updateCutscene() {
+  cutsceneTimer++;
+  switch (cutsceneStep) {
+    case 0: // Walking together
+      playerCutX += 0.4;
+      partnerX += 0.4;
+      if (cutsceneTimer > 200) { cutsceneStep = 1; cutsceneTimer = 0; }
+      break;
+    case 1: // Sky darkens, ominous
+      if (cutsceneTimer > 80) { cutsceneStep = 2; cutsceneTimer = 0; dragonX = 1000; dragonY = 80; }
+      break;
+    case 2: // Dragon flies in fast
+      dragonX -= 5;
+      dragonY = 200 + Math.sin(cutsceneTimer * 0.07) * 60;
+      if (cutsceneTimer > 160) { cutsceneStep = 3; cutsceneTimer = 0; dragonX = 600; }
+      break;
+    case 3: // Dragon breathes fire at partner
+      dragonX = 580;
+      dragonY = 240;
+      fireBreathAlpha = Math.min(1, cutsceneTimer / 20);
+      if (cutsceneTimer > 100) { cutsceneStep = 4; cutsceneTimer = 0; fireBreathAlpha = 0; }
+      break;
+    case 4: // Golden shield protects partner!
+      shieldAlpha = cutsceneTimer < 20 ? cutsceneTimer / 20 :
+                   cutsceneTimer > 80 ? (100 - cutsceneTimer) / 20 : 1;
+      shieldAlpha = Math.max(0, Math.min(1, shieldAlpha));
+      if (cutsceneTimer > 120) { cutsceneStep = 5; cutsceneTimer = 0; shieldAlpha = 0; }
+      break;
+    case 5: // Dragon roars, turns to player
+      dragonX -= 1.5;
+      dragonY = 270;
+      dragonRoarSize = Math.sin(cutsceneTimer * 0.2) * 10;
+      if (cutsceneTimer > 80) { cutsceneStep = 6; cutsceneTimer = 0; }
+      break;
+    case 6: // Dragon charges player!
+      dragonX -= 4;
+      dragonY = 320 - cutsceneTimer * 0.5;
+      if (cutsceneTimer > 80) { cutsceneStep = 7; cutsceneTimer = 0; }
+      break;
+    case 7: // FLASH!
+      cutsceneFlash = cutsceneTimer < 20 ? cutsceneTimer / 20 : (40 - cutsceneTimer) / 20;
+      cutsceneFlash = Math.max(0, Math.min(1, cutsceneFlash));
+      if (cutsceneTimer > 40) { cutsceneStep = 8; cutsceneTimer = 0; cutsceneFlash = 0; }
+      break;
+    case 8: // Black screen + text
+      cutsceneBlack = Math.min(1, cutsceneTimer / 30);
+      cutsceneTextAlpha = cutsceneTimer > 60 ? Math.min(1, (cutsceneTimer - 60) / 40) : 0;
+      if (cutsceneTimer > 200) { cutsceneStep = 9; cutsceneTimer = 0; }
+      break;
+    case 9: // Fade to game
+      cutsceneTextAlpha = Math.max(0, 1 - cutsceneTimer / 60);
+      if (cutsceneTimer > 80) beginGame();
+      break;
+  }
+}
+
+function drawDragon(x, y, fr) {
+  const ax = Math.floor(x), ay = Math.floor(y);
+  const wingFlap = Math.sin(fr * 0.15) * 15;
+  // Body
+  ctx.fillStyle = '#CC3300';
+  ctx.fillRect(ax - 40, ay - 20, 80, 40);
+  // Head
+  ctx.fillStyle = '#FF4400';
+  ctx.fillRect(ax + 30, ay - 15, 50, 30);
+  // Snout
+  ctx.fillStyle = '#FF6600';
+  ctx.fillRect(ax + 70, ay - 8, 30, 16);
+  // Eye
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(ax + 50, ay - 12, 8, 8);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(ax + 52, ay - 11, 4, 4);
+  // Wings
+  ctx.fillStyle = '#8B0000';
+  ctx.beginPath();
+  ctx.moveTo(ax, ay - 20);
+  ctx.lineTo(ax - 60, ay - 20 - wingFlap);
+  ctx.lineTo(ax - 30, ay);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(ax, ay - 20);
+  ctx.lineTo(ax + 20, ay - 40 - wingFlap);
+  ctx.lineTo(ax + 40, ay - 10);
+  ctx.closePath();
+  ctx.fill();
+  // Tail
+  ctx.fillStyle = '#CC3300';
+  ctx.beginPath();
+  ctx.moveTo(ax - 40, ay);
+  ctx.lineTo(ax - 80, ay + 20);
+  ctx.lineTo(ax - 60, ay + 5);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawCutscene() {
+  // Sky - darker in later steps
+  const skyDark = cutsceneStep >= 1 ? Math.min(0.6, (cutsceneStep - 1) * 0.15) : 0;
+  ctx.fillStyle = `rgb(${Math.floor(26 - skyDark*26)},${Math.floor(42 - skyDark*42)},${Math.floor(90 - skyDark*60)})`;
+  ctx.fillRect(0, 0, 800, 600);
+
+  // Ground
+  ctx.fillStyle = '#3a6a2a';
+  ctx.fillRect(0, 380, 800, 220);
+  ctx.fillStyle = '#8a7060';
+  ctx.fillRect(0, 380, 800, 55);
+  for (let i = 0; i < 20; i++) {
+    ctx.fillStyle = '#4a8a3a';
+    ctx.fillRect(i * 40, 380, 4, 10);
+    ctx.fillRect(i * 40 + 20, 388, 3, 7);
+  }
+  // Clouds
+  ctx.fillStyle = `rgba(200,220,255,${0.4 - skyDark * 0.4})`;
+  ctx.fillRect(80, 70, 110, 30); ctx.fillRect(110, 55, 65, 25);
+  ctx.fillRect(380, 100, 130, 28); ctx.fillRect(410, 85, 75, 24);
+  ctx.fillRect(640, 80, 100, 26);
+
+  if (cutsceneStep < 8) {
+    // Draw player
+    ctx.save();
+    ctx.translate(Math.floor(playerCutX), 365);
+    ctx.scale(1.8, 1.8);
+    drawPlayerSmall(0, 0, player.charType, 1, cutsceneTimer);
+    ctx.restore();
+
+    // Draw partner
+    ctx.save();
+    ctx.translate(Math.floor(partnerX + 60), 365);
+    ctx.scale(1.8, 1.8);
+    const pIdx = charTypes.indexOf(cutscenePartner);
+    drawPlayerSmall(0, 0, pIdx >= 0 ? pIdx : 2, 1, cutsceneTimer + 10);
+    ctx.restore();
+
+    // Dragon
+    if (cutsceneStep >= 2) {
+      drawDragon(dragonX, dragonY, cutsceneTimer);
+    }
+
+    // Fire breath (step 3)
+    if (fireBreathAlpha > 0 && cutsceneStep === 3) {
+      ctx.globalAlpha = fireBreathAlpha * 0.85;
+      const grd = ctx.createLinearGradient(dragonX + 100, dragonY, partnerX + 60, 365);
+      grd.addColorStop(0, '#FF6600');
+      grd.addColorStop(0.5, '#FF3300');
+      grd.addColorStop(1, 'rgba(255,100,0,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.moveTo(dragonX + 90, dragonY - 5);
+      ctx.lineTo(partnerX + 80, 340);
+      ctx.lineTo(partnerX + 40, 380);
+      ctx.lineTo(dragonX + 90, dragonY + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // Shield (step 4)
+    if (shieldAlpha > 0) {
+      ctx.globalAlpha = shieldAlpha;
+      // Glow
+      const sg = ctx.createRadialGradient(partnerX + 60, 340, 0, partnerX + 60, 340, 55);
+      sg.addColorStop(0, 'rgba(255,255,200,0.9)');
+      sg.addColorStop(0.6, 'rgba(255,220,50,0.5)');
+      sg.addColorStop(1, 'rgba(255,200,0,0)');
+      ctx.fillStyle = sg;
+      ctx.beginPath();
+      ctx.arc(partnerX + 60, 340, 55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(partnerX + 60, 340, 48, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Dragon roar visual (step 5)
+    if (cutsceneStep === 5 && dragonRoarSize !== 0) {
+      ctx.strokeStyle = 'rgba(255,50,0,0.6)';
+      ctx.lineWidth = 2 + Math.abs(dragonRoarSize) * 0.3;
+      ctx.beginPath();
+      ctx.arc(dragonX + 50, dragonY - 10, 30 + Math.abs(dragonRoarSize), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // White flash
+  if (cutsceneFlash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${cutsceneFlash})`;
+    ctx.fillRect(0, 0, 800, 600);
+  }
+
+  // Black screen
+  if (cutsceneStep >= 8 && cutsceneBlack > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${cutsceneBlack})`;
+    ctx.fillRect(0, 0, 800, 600);
+  }
+
+  // Text overlay
+  if (cutsceneTextAlpha > 0) {
+    ctx.globalAlpha = cutsceneTextAlpha;
+    ctx.fillStyle = '#fff';
+    ctx.font = '26px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('気がついたら、見知らぬ丘にいた...', 400, 260);
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#aaddff';
+    ctx.fillText('（剣だけが、そこにあった）', 400, 305);
+    ctx.globalAlpha = 1;
+  }
+
+  // Bottom caption bar
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, 538, 800, 62);
+  ctx.fillStyle = '#ddd';
+  ctx.font = '15px sans-serif';
+  ctx.textAlign = 'center';
+  const captions = [
+    'ふたりは一緒に旅をしていた...',
+    '突然、空が暗くなった...',
+    '巨大なドラゴンが空から迫ってくる！',
+    'ドラゴンが炎を吐いた！仲間に向かって！',
+    '黄金の光が仲間を守った！',
+    '「次はお前だ...」ドラゴンが向きを変えた！',
+    'ドラゴンが突進してくる！',
+    '...！！',
+    '', ''
+  ];
+  ctx.fillText(captions[cutsceneStep] || '', 400, 562);
+}
+
+function drawPlayerSmall(x, y, charTypeIdx, facing, animFrame) {
+  const ct = charTypes[charTypeIdx] || charTypes[0];
+  if (charTypeIdx === 4) {
+    // Zelda small
+    ctx.fillStyle = '#4169E1';
+    ctx.fillRect(x - 7, y - 10, 14, 20);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(x - 7, y - 10, 14, 4);
+    ctx.fillStyle = '#FDBCB4';
+    ctx.fillRect(x - 6, y - 22, 12, 14);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(x - 6, y - 24, 12, 6);
+    ctx.fillRect(x - 8, y - 22, 3, 12);
+    ctx.fillRect(x + 5, y - 22, 3, 12);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x - 3, y - 16, 2, 2);
+    ctx.fillRect(x + 1, y - 16, 2, 2);
+    return;
+  }
+  ctx.fillStyle = '#228B22';
+  ctx.fillRect(x - 8, y - 12, 16, 18);
+  ctx.fillStyle = ct.outfitColor;
+  ctx.fillRect(x - 6, y + 6, 5, 10);
+  ctx.fillRect(x + 1, y + 6, 5, 10);
+  ctx.fillStyle = '#FDBCB4';
+  ctx.fillRect(x - 7, y - 24, 14, 14);
+  ctx.fillStyle = ct.hairColor;
+  ctx.fillRect(x - 7, y - 26, 14, 8);
+  ctx.fillStyle = '#333';
+  ctx.fillRect(x - 4, y - 16, 2, 2);
+  ctx.fillRect(x + 2, y - 16, 2, 2);
+}
+
+// ===== TITLE SCREEN =====
+function drawTitle() {
+  ctx.fillStyle = '#050515';
+  ctx.fillRect(0, 0, 800, 600);
+
+  // Stars
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 100; i++) {
+    const sx = (i * 137) % 800;
+    const sy = (i * 97) % 500;
+    const twinkle = (Math.sin(frame * 0.05 + i) + 1) / 2;
+    ctx.globalAlpha = 0.3 + twinkle * 0.7;
+    ctx.fillRect(sx, sy, i % 3 === 0 ? 2 : 1, i % 3 === 0 ? 2 : 1);
+  }
+  ctx.globalAlpha = 1;
+
+  // Title
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 64px serif';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = '#FF8800';
+  ctx.shadowBlur = 20;
+  ctx.fillText('ゼドラの伝説', 400, 180);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#88aaff';
+  ctx.font = '22px serif';
+  ctx.fillText('〜 ゼドラの伝説 〜', 400, 230);
+
+  // Draw some preview characters
+  ctx.save();
+  ctx.translate(300, 360);
+  ctx.scale(2, 2);
+  drawPlayerSmall(0, 0, 0, 2, frame);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(400, 360);
+  ctx.scale(2, 2);
+  drawZelda(0, 0, frame);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(500, 370);
+  ctx.scale(1.5, 1.5);
+  drawGoblin(0, 0, frame);
+  ctx.restore();
+
+  // Press any key
+  const blink = Math.sin(frame * 0.06) > 0;
+  if (blink) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px sans-serif';
+    ctx.fillText('なにかキーを押してください', 400, 480);
+  }
+
+  ctx.fillStyle = '#666';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('Arrow/WASD:移動  Z/Space:攻撃  X:ギガスラッシュ  C:スキル  Enter:話す  Tab:スキル一覧', 400, 540);
+  ctx.fillText('© 2025 ゼドラの伝説', 400, 570);
+}
+
+// ===== GAME OVER SCREEN =====
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, 800, 600);
+  ctx.fillStyle = '#ff2222';
+  ctx.font = 'bold 60px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ゲームオーバー', 400, 250);
+  ctx.fillStyle = '#aaa';
+  ctx.font = '24px sans-serif';
+  ctx.fillText('Enterキーでリトライ', 400, 340);
+  ctx.fillStyle = '#666';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('(現在のマップ最初から再開)', 400, 380);
+}
+
+function restartFromMap() {
+  player.hp = Math.floor(player.maxHp * 0.5);
+  player.mp = Math.floor(player.maxMp * 0.5);
+  loadMap(currentMap);
+  gameState = 'game';
+}
+
+// ===== VICTORY SCREEN =====
+function drawVictory() {
+  ctx.fillStyle = 'rgba(0,0,50,0.95)';
+  ctx.fillRect(0, 0, 800, 600);
+
+  // Sparkles
+  for (let i = 0; i < 20; i++) {
+    const sx = (i * 200 + frame * 3) % 800;
+    const sy = (i * 150 + Math.sin(frame * 0.1 + i) * 100 + 300) % 600;
+    ctx.fillStyle = ['#FFD700','#FF8800','#FF4400','#FFAAFF'][i % 4];
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(sx, sy, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = '#FFD700';
+  ctx.shadowColor = '#FF8800';
+  ctx.shadowBlur = 30;
+  ctx.font = 'bold 50px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ガノンドルフを倒した！', 400, 160);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#fff';
+  ctx.font = '24px serif';
+  ctx.fillText('世界に平和が戻った...', 400, 230);
+
+  ctx.fillStyle = '#aaddff';
+  ctx.font = '18px sans-serif';
+  ctx.fillText('リントンは仲間たちと共に', 400, 290);
+  ctx.fillText('長い旅路を終えた。', 400, 320);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('Lv.' + player.level + ' で冒険終了！', 400, 380);
+  ctx.fillText('討伐EXP: ガノンドルフ 500、呪いガノン 200', 400, 410);
+
+  const joined = companionDefs.filter(c => c.joined).map(c => c.name).join('、');
+  ctx.fillStyle = '#88ffaa';
+  ctx.fillText('仲間: ' + (joined || 'なし'), 400, 440);
+
+  const blink = Math.sin(frame * 0.06) > 0;
+  if (blink) {
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px sans-serif';
+    ctx.fillText('Enterでタイトルへ', 400, 500);
+  }
+}
+
+// ===== INIT / START =====
+function startGame() {
+  if (gameState === 'title') gameState = 'charselect';
+}
+
+function startCutsceneAndGame() {
+  startCutscene();
+}
+
+function beginGame() {
+  gameState = 'game';
+  loadMap(0);
+  player.hp = player.maxHp;
+  player.mp = player.maxMp;
+  tryAutoInteract();
+}
+
+function resetGame() {
+  player = {
+    x: 400, y: 300,
+    vx: 0, vy: 0,
+    speed: 3,
+    facing: 2,
+    hp: 80, maxHp: 80,
+    mp: 40, maxMp: 40,
+    atk: 8, def: 2,
+    level: 1, exp: 0, expNext: 100,
+    name: 'リントン',
+    charType: 0,
+    skills: [0],
+    activeEffects: {},
+    invincible: 0,
+    attacking: 0,
+    attackDir: 2,
+    walkAnim: 0
+  };
+  for (const c of companionDefs) c.joined = false;
+  companions = [];
+  maps = {};
+  enemies = [];
+  particles = [];
+  floatingTexts = [];
+  messageQueue = [];
+  currentMessage = null;
+  pendingLevelUps = 0;
+  playerTrail = [];
+  hillClearBanner = 0;
+  dragonX = 1000; dragonY = -100;
+  partnerX = 520; playerCutX = 280;
+  fireBreathAlpha = 0; dragonRoarSize = 0;
+  cutsceneFlash = 0; cutsceneBlack = 0; cutsceneTextAlpha = 0;
+  gameState = 'title';
+  frame = 0;
+}
+
+// ===== PROJECTILE DRAWING =====
+function drawProjectiles(camX, camY) {
+  for (const p of projectiles) {
+    if (p.type === 'zeldaArrow') {
+      ctx.fillStyle = '#88DDFF';
+      ctx.fillRect(p.x - camX - 3, p.y - camY - 1, 10, 2);
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(p.x - camX - 5, p.y - camY - 2, 3, 4);
+    } else {
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(p.x - camX - 4, p.y - camY - 4, 8, 8);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(p.x - camX - 2, p.y - camY - 2, 4, 4);
+    }
+  }
+}
+
+// ===== MINIMAP =====
+function drawMinimap() {
+  const mx = 10, my = 10;
+  const mw = 130, mh = 98;
+  const scaleX = mw / (MAP_COLS * TILE);
+  const scaleY = mh / (MAP_ROWS * TILE);
+
+  // Background
+  ctx.fillStyle = 'rgba(0,0,20,0.82)';
+  ctx.fillRect(mx - 2, my - 2, mw + 4, mh + 4);
+  ctx.strokeStyle = '#446688';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mx - 2, my - 2, mw + 4, mh + 4);
+
+  // Tiles (sampled every 2 tiles for speed)
+  const tiles = maps[currentMap];
+  if (tiles) {
+    const tileColors = {
+      0: '#3a6a2a', 1: '#1a3a10', 2: '#1a6b9a', 3: '#a07840',
+      4: '#777', 5: '#1a0a2e', 6: '#222', 7: '#b8975a', 8: '#d4b483',
+      9: '#666', 10: '#600080'
+    };
+    for (let r = 0; r < MAP_ROWS; r += 2) {
+      for (let c = 0; c < MAP_COLS; c += 2) {
+        const t = tiles[r][c];
+        ctx.fillStyle = tileColors[t] || '#3a6a2a';
+        ctx.fillRect(mx + c * scaleX * 2, my + r * scaleY * 2, scaleX * 2 + 1, scaleY * 2 + 1);
+      }
+    }
+  }
+
+  // NPCs (cyan dots)
+  for (const npc of npcs) {
+    ctx.fillStyle = '#00ffff';
+    ctx.fillRect(mx + npc.x * scaleX - 2, my + npc.y * scaleY - 2, 4, 4);
+  }
+
+  // Enemies (red dots, skip dead)
+  for (const en of enemies) {
+    if (en.dead) continue;
+    ctx.fillStyle = en.isBoss ? '#ff6600' : '#ff2222';
+    ctx.fillRect(mx + en.x * scaleX - 1, my + en.y * scaleY - 1, 3, 3);
+  }
+
+  // Player (bright yellow blinking dot)
+  if (frame % 20 < 14) {
+    ctx.fillStyle = '#FFD700';
+    ctx.fillRect(mx + player.x * scaleX - 3, my + player.y * scaleY - 3, 6, 6);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(mx + player.x * scaleX - 1, my + player.y * scaleY - 1, 2, 2);
+  }
+
+  // Label
+  ctx.fillStyle = '#aaddff';
+  ctx.font = '8px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(['始まりの丘','迷いの森','ゾーラ川','リトの村','闇の城'][currentMap], mx, my + mh + 10);
+  ctx.fillStyle = '#888';
+  ctx.fillText('[M]世界地図', mx + 70, my + mh + 10);
+}
+
+// ===== WORLD MAP =====
+function drawWorldMap() {
+  // Full-screen overlay
+  ctx.fillStyle = 'rgba(0,0,30,0.96)';
+  ctx.fillRect(0, 0, 800, 600);
+
+  // Title
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 22px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('世界地図 ～ゼドラの伝説～', 400, 38);
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(30, 48); ctx.lineTo(770, 48); ctx.stroke();
+
+  // Map areas (5 areas horizontal)
+  const areas = [
+    { name: '始まりの丘', sub: 'Starting Hill', color: '#2d6b1a', border: '#5aaa3a',
+      icon: 'hill', companion: null, cleared: currentMap > 0 },
+    { name: '迷いの森', sub: 'Lost Forest', color: '#1a4a0a', border: '#3a8a2a',
+      icon: 'forest', companion: 'zelda', cleared: currentMap > 1 },
+    { name: 'ゾーラ川', sub: 'Zora River', color: '#0a2a5a', border: '#2255aa',
+      icon: 'water', companion: 'sid', cleared: currentMap > 2 },
+    { name: 'リトの村', sub: 'Rito Village', color: '#3a3a4a', border: '#7a7aaa',
+      icon: 'rock', companion: 'churi', cleared: currentMap > 3 },
+    { name: '闇の城', sub: 'Dark Castle', color: '#1a0a2e', border: '#6622aa',
+      icon: 'castle', companion: 'ganon', cleared: false },
+  ];
+
+  const boxW = 128, boxH = 220;
+  const startX = 400 - (boxW * 5 + 16 * 4) / 2;
+
+  for (let i = 0; i < areas.length; i++) {
+    const a = areas[i];
+    const bx = startX + i * (boxW + 16);
+    const by = 68;
+    const isCurrent = i === currentMap;
+
+    // Box background
+    ctx.fillStyle = a.color;
+    ctx.fillRect(bx, by, boxW, boxH);
+
+    // Border (bright if current)
+    ctx.strokeStyle = isCurrent ? '#FFD700' : a.border;
+    ctx.lineWidth = isCurrent ? 3 : 1;
+    ctx.strokeRect(bx, by, boxW, boxH);
+
+    // Current map glow
+    if (isCurrent) {
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 12;
+      ctx.strokeRect(bx, by, boxW, boxH);
+      ctx.shadowBlur = 0;
+    }
+
+    // Terrain icon
+    drawMapAreaIcon(ctx, bx + boxW/2, by + 60, a.icon, frame);
+
+    // Map name
+    ctx.fillStyle = isCurrent ? '#FFD700' : '#eee';
+    ctx.font = `bold ${isCurrent ? 13 : 12}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(a.name, bx + boxW/2, by + 115);
+    ctx.fillStyle = '#889';
+    ctx.font = '9px sans-serif';
+    ctx.fillText(a.sub, bx + boxW/2, by + 128);
+
+    // Companion status
+    if (a.companion) {
+      const compDef = companionDefs.find(c => c.id === a.companion);
+      const joined = compDef && compDef.joined;
+      ctx.fillStyle = joined ? '#88ff88' : '#ff8888';
+      ctx.font = '10px sans-serif';
+      const compName = { zelda: 'ゼルダ', sid: 'シド', churi: 'チューリ', ganon: '呪いガノン' }[a.companion];
+      ctx.fillText((joined ? '✓ ' : '? ') + compName, bx + boxW/2, by + 148);
+      ctx.fillStyle = joined ? '#44aa44' : '#554';
+      ctx.fillText(joined ? '加入済み' : '未加入', bx + boxW/2, by + 162);
+    }
+
+    // Enemy status (map 4)
+    if (i === 4) {
+      const cg = enemies.find(e => e.type === 'curseGanon');
+      const gd = enemies.find(e => e.type === 'ganondorf');
+      if (currentMap === 4) {
+        ctx.fillStyle = cg && !cg.dead ? '#ff6622' : '#44aa44';
+        ctx.font = '10px sans-serif';
+        ctx.fillText('呪いガノン: ' + (cg && !cg.dead ? 'HP ' + cg.hp : '撃破'), bx + boxW/2, by + 148);
+        ctx.fillStyle = gd && !gd.dead ? '#ff4400' : '#44aa44';
+        ctx.fillText('ガノンドルフ: ' + (gd && !gd.dead ? 'HP ' + gd.hp : '撃破'), bx + boxW/2, by + 162);
+      } else {
+        ctx.fillStyle = '#aa6622';
+        ctx.font = '10px sans-serif';
+        ctx.fillText('最終ボスが待つ...', bx + boxW/2, by + 155);
+      }
+    }
+
+    // Cleared badge
+    if (a.cleared) {
+      ctx.fillStyle = 'rgba(0,180,0,0.25)';
+      ctx.fillRect(bx + 4, by + 4, boxW - 8, 20);
+      ctx.fillStyle = '#88ff88';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('クリア済み ✓', bx + boxW/2, by + 17);
+    }
+
+    // Current marker (blinking arrow + "現在地")
+    if (isCurrent) {
+      if (frame % 30 < 20) {
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('▼ 現在地 ▼', bx + boxW/2, by + boxH - 10);
+        // Player dot on minimap inside box
+        const miniW = boxW - 12, miniH = 40;
+        const mx2 = bx + 6, my2 = by + boxH - 52;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(mx2, my2, miniW, miniH);
+        ctx.strokeStyle = '#446688';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(mx2, my2, miniW, miniH);
+        const px = mx2 + (player.x / (MAP_COLS * TILE)) * miniW;
+        const py = my2 + (player.y / (MAP_ROWS * TILE)) * miniH;
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Connection arrow →
+    if (i < 4) {
+      ctx.fillStyle = '#556688';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText('→', bx + boxW + 8, by + boxH/2 + 7);
+    }
+  }
+
+  // Legend
+  ctx.fillStyle = 'rgba(0,0,30,0.8)';
+  ctx.fillRect(20, 310, 760, 56);
+  ctx.strokeStyle = '#334455';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(20, 310, 760, 56);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#FFD700'; ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('凡例:', 30, 328);
+  ctx.fillStyle = '#ff8888'; ctx.fillRect(65, 317, 10, 10);
+  ctx.fillStyle = '#ccc'; ctx.font = '10px sans-serif'; ctx.fillText('未加入', 80, 328);
+  ctx.fillStyle = '#88ff88'; ctx.fillRect(130, 317, 10, 10);
+  ctx.fillStyle = '#ccc'; ctx.fillText('加入済み', 145, 328);
+  ctx.fillStyle = '#FFD700'; ctx.fillRect(205, 317, 10, 10);
+  ctx.fillStyle = '#ccc'; ctx.fillText('現在地', 220, 328);
+  ctx.fillStyle = '#44aa44'; ctx.fillRect(270, 317, 10, 10);
+  ctx.fillStyle = '#ccc'; ctx.fillText('クリア済み', 285, 328);
+
+  // Player stats
+  ctx.fillStyle = '#aaddff';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('プレイヤー: ' + player.name + '  Lv.' + player.level +
+    '  HP:' + player.hp + '/' + player.maxHp + '  MP:' + player.mp + '/' + player.maxMp +
+    '  ATK:' + player.atk + '  DEF:' + player.def, 30, 350);
+  const joinedNames = companionDefs.filter(c => c.joined).map(c => c.name).join('、');
+  ctx.fillText('仲間: ' + (joinedNames || 'なし'), 30, 364);
+
+  // Close hint
+  ctx.fillStyle = '#556677';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('[M] / [Esc] で閉じる', 400, 585);
+}
+
+function drawMapAreaIcon(ctx, cx, cy, type, f) {
+  const bob = Math.sin(f * 0.05) * 2;
+  ctx.save();
+  ctx.translate(cx, cy + bob);
+  if (type === 'hill') {
+    // Green hills
+    ctx.fillStyle = '#4a9a3a';
+    ctx.beginPath(); ctx.arc(0, 8, 22, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#3a7a2a';
+    ctx.beginPath(); ctx.arc(-14, 12, 14, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#5aaa4a';
+    ctx.beginPath(); ctx.arc(10, 10, 16, Math.PI, 0); ctx.fill();
+    // Sun
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath(); ctx.arc(-8, -12, 7, 0, Math.PI * 2); ctx.fill();
+  } else if (type === 'forest') {
+    // Trees
+    for (let t = 0; t < 5; t++) {
+      const tx = (t - 2) * 12;
+      ctx.fillStyle = '#2a6a1a';
+      ctx.beginPath(); ctx.arc(tx, -6 + (t%2)*4, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4a1400';
+      ctx.fillRect(tx - 3, 5, 6, 10);
+    }
+  } else if (type === 'water') {
+    // Waves
+    ctx.fillStyle = '#0a3a7a';
+    ctx.fillRect(-28, -8, 56, 28);
+    ctx.strokeStyle = '#2288cc';
+    ctx.lineWidth = 2;
+    for (let w = 0; w < 3; w++) {
+      ctx.beginPath();
+      ctx.moveTo(-20, -2 + w * 8);
+      ctx.quadraticCurveTo(-5, -8 + w * 8, 10, -2 + w * 8);
+      ctx.quadraticCurveTo(18, 2 + w * 8, 25, -2 + w * 8);
+      ctx.stroke();
+    }
+    // Bridge
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(-10, -8, 20, 28);
+    ctx.fillRect(-12, -4, 24, 5);
+    ctx.fillRect(-12, 10, 24, 5);
+  } else if (type === 'rock') {
+    // Rocky peaks
+    ctx.fillStyle = '#666';
+    ctx.beginPath();
+    ctx.moveTo(-24, 18); ctx.lineTo(-8, -14); ctx.lineTo(8, 4);
+    ctx.lineTo(18, -18); ctx.lineTo(30, 18); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.moveTo(-8, -14); ctx.lineTo(0, -8); ctx.lineTo(8, 4);
+    ctx.lineTo(0, 12); ctx.lineTo(-12, 4); ctx.closePath(); ctx.fill();
+    // Village hut
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(-6, 2, 12, 10);
+    ctx.fillStyle = '#cc4422';
+    ctx.beginPath(); ctx.moveTo(-9, 2); ctx.lineTo(0, -6); ctx.lineTo(9, 2); ctx.closePath(); ctx.fill();
+  } else if (type === 'castle') {
+    // Dark castle
+    ctx.fillStyle = '#2a1040';
+    ctx.fillRect(-22, -4, 44, 22);
+    // Towers
+    ctx.fillRect(-26, -16, 12, 18); ctx.fillRect(14, -16, 12, 18);
+    // Battlements
+    ctx.fillStyle = '#1a0830';
+    for (let b = 0; b < 3; b++) { ctx.fillRect(-24 + b*4, -22, 3, 7); }
+    for (let b = 0; b < 3; b++) { ctx.fillRect(16 + b*4, -22, 3, 7); }
+    // Red eyes glow
+    ctx.fillStyle = `rgba(255,50,0,${0.5 + Math.sin(f * 0.1) * 0.4})`;
+    ctx.fillRect(-10, -2, 6, 6); ctx.fillRect(4, -2, 6, 6);
+    // Gate
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(0, 12, 6, Math.PI, 0); ctx.fillRect(-6, 8, 12, 10); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ===== MAIN GAME LOOP =====
+function gameLoop() {
+  ctx.clearRect(0, 0, 800, 600);
+  frame++;
+
+  if (gameState === 'title') {
+    drawTitle();
+  } else if (gameState === 'charselect') {
+    drawCharSelect();
+  } else if (gameState === 'cutscene') {
+    updateCutscene();
+    drawCutscene();
+  } else if (gameState === 'game' || gameState === 'skillpanel' || gameState === 'levelup' || gameState === 'mapscreen') {
+    // Update game
+    if (gameState === 'game') {
+      updatePlayer();
+      updateEnemies();
+      updateCompanionAttacks();
+      updateProjectiles();
+      updateParticles();
+      updateFloatingTexts();
+      updateMessages();
+      updateRegen();
+      tryAutoInteract();
+    }
+
+    // Draw map
+    const tiles = maps[currentMap];
+    if (tiles) drawMap(tiles, camera.x, camera.y);
+
+    // Draw NPCs
+    for (const npc of npcs) drawNPC(npc, camera.x, camera.y);
+
+    // Draw enemies
+    for (const en of enemies) drawEnemy(en, camera.x, camera.y);
+
+    // Draw companions
+    for (let i = 0; i < companions.length; i++) drawCompanion(companions[i], i, camera.x, camera.y);
+
+    // Draw projectiles
+    drawProjectiles(camera.x, camera.y);
+
+    // Draw particles
+    drawParticles(camera.x, camera.y);
+
+    // Draw player
+    const psx = player.x - camera.x, psy = player.y - camera.y;
+    if (player.invincible > 0 && player.invincible % 4 < 2) {
+      // flash
+    } else {
+      drawPlayer(psx, psy, player.charType, player.facing, player.walkAnim, player.attacking);
+    }
+
+    // Barrier visual
+    if (player.activeEffects.barrier) {
+      ctx.strokeStyle = 'rgba(100,150,255,0.5)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(psx, psy - 12, 24, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Draw floating texts
+    drawFloatingTexts(camera.x, camera.y);
+
+    // Draw UI
+    drawUI();
+    drawMission();
+    drawMinimap();
+    drawMessage();
+    drawHillClearBanner();
+
+    // Overlay screens
+    if (gameState === 'skillpanel') drawSkillPanel();
+    if (gameState === 'levelup') drawLevelUpScreen();
+    if (gameState === 'mapscreen') drawWorldMap();
+
+  } else if (gameState === 'gameover') {
+    // Still draw game in background
+    const tiles = maps[currentMap];
+    if (tiles) drawMap(tiles, camera.x, camera.y);
+    drawGameOver();
+  } else if (gameState === 'victory') {
+    drawVictory();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ===== GOBLIN DRAWING (global) =====
+// (already defined above as drawGoblin)
+
+// Kick off
+gameLoop();
+</script>
+</body>
+</html>
