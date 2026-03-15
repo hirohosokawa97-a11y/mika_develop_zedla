@@ -209,7 +209,7 @@ let T_MIN = 40, T_MAX = 70;
 const DIFF_SETTINGS = {
   easy: {
     label: 'かんたん', color: '#00cc55', emoji: '🌱',
-    tMin: 55, tMax: 90, spawnI: 13,
+    tMin: 55, tMax: 90, spawnI: 8,
     desc: ['お客さんのタイマーが長い', 'ゆっくりペースで練習できる'],
     missions: [
       { text: '醤油ラーメンを1杯作る',         check: g => g.shoyu    >= 1 },
@@ -221,7 +221,7 @@ const DIFF_SETTINGS = {
   },
   normal: {
     label: 'ふつう', color: '#FFD700', emoji: '🍜',
-    tMin: 40, tMax: 70, spawnI: 9,
+    tMin: 40, tMax: 70, spawnI: 5,
     desc: ['標準的な難しさ', 'タイマーもペースも普通'],
     missions: [
       { text: '醤油ラーメンを2杯作る',         check: g => g.shoyu    >= 2 },
@@ -233,7 +233,7 @@ const DIFF_SETTINGS = {
   },
   hard: {
     label: 'むずかしい', color: '#e94560', emoji: '🔥',
-    tMin: 22, tMax: 40, spawnI: 6,
+    tMin: 22, tMax: 40, spawnI: 3,
     desc: ['タイマーが短くお客が多い', 'ミッションも高難度'],
     missions: [
       { text: '醤油ラーメンを3杯作る',         check: g => g.shoyu    >= 3 },
@@ -484,7 +484,7 @@ function startActualGame() {
   TUT.done = true;
   P.holding = null;
   G.running = true;
-  G.spawnT = 4;
+  G.spawnT = 2;
   fb('🏪 開店！ようこそ！', 2500);
 }
 
@@ -926,15 +926,29 @@ function drawCustomers() {
     ctx.textAlign = 'left';
 
     if (!c.done) {
-      // 吹き出し
-      const bx = sx, by = sy - 52;
+      // タイマーバー（HUDより下に確実に表示）
+      const bw = 68;
+      const timerBarY = HUD_H + 6; // y=116 固定（HUD直下）
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(sx - bw / 2, timerBarY, bw, 8);
+      ctx.fillStyle = ratio > 0.5 ? '#00cc55' : ratio > 0.22 ? '#FFD700' : '#e94560';
+      ctx.fillRect(sx - bw / 2, timerBarY, bw * ratio, 8);
+
+      // 秒数
+      ctx.fillStyle = ratio < 0.22 ? '#e94560' : '#eee';
+      ctx.font = `bold ${ratio < 0.22 ? 12 : 10}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(c.timer) + 's', sx, timerBarY - 2);
+
+      // 吹き出し（タイマーバー直下）
+      const bx = sx, by = timerBarY + 38;
       ctx.fillStyle = 'white';
       ctx.strokeStyle = '#e94560';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       roundRect(bx - 28, by - 20, 56, 22, 5);
       ctx.fill(); ctx.stroke();
-      // しっぽ
+      // しっぽ（下向き）
       ctx.fillStyle = 'white';
       ctx.beginPath();
       ctx.moveTo(bx - 5, by + 2); ctx.lineTo(bx + 5, by + 2); ctx.lineTo(bx, by + 10);
@@ -942,22 +956,7 @@ function drawCustomers() {
       // 注文名
       ctx.fillStyle = '#222';
       ctx.font = 'bold 12px sans-serif';
-      ctx.textAlign = 'center';
       ctx.fillText(SOUP[c.order].name, bx, by - 4);
-      ctx.textAlign = 'left';
-
-      // タイマーバー
-      const bw = 68;
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.fillRect(sx - bw / 2, by - 36, bw, 8);
-      ctx.fillStyle = ratio > 0.5 ? '#00cc55' : ratio > 0.22 ? '#FFD700' : '#e94560';
-      ctx.fillRect(sx - bw / 2, by - 36, bw * ratio, 8);
-
-      // 秒数
-      ctx.fillStyle = ratio < 0.22 ? '#e94560' : '#eee';
-      ctx.font = `bold ${ratio < 0.22 ? 12 : 10}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(Math.ceil(c.timer) + 's', sx, by - 39);
       ctx.textAlign = 'left';
     }
   });
@@ -1147,8 +1146,8 @@ function loop(ts) {
     if (TUT.active) { draw(); updateActionBtn(); requestAnimationFrame(loop); return; }
     G.spawnT -= dt;
     if (G.spawnT <= 0) {
-      if (Math.random() < 0.72) spawnCust();
-      G.spawnT = G.spawnI + Math.random() * 8;
+      if (Math.random() < 0.88) spawnCust();
+      G.spawnT = G.spawnI + Math.random() * 4;
     }
 
     // お客さんタイマー
