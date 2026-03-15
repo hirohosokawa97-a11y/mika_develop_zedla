@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>みかちゅうタイピング</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --bg: linear-gradient(135deg, #ffe1f0 0%, #fff6c7 30%, #d9ffe4 65%, #d7e3ff 100%);
+      --card-bg: rgba(255, 255, 255, 0.92);
+      --accent: #ff7a9e;
+      --accent-soft: #ffe7f0;
+      --text-main: #333;
+      --text-sub: #777;
+      --ok: #2ecc71;
+      --ng: #e74c3c;
+      --chip-yellow: #ffe09a;
+      --chip-blue: #c1e6ff;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text-main);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 960px;
+    }
+
+    .card {
+      position: relative;
+      background: var(--card-bg);
+      border-radius: 24px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12);
+      padding: 20px 20px 24px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+
+    .card::before,
+    .card::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      opacity: 0.25;
+      pointer-events: none;
+    }
+
+    .card::before {
+      width: 160px;
+      height: 160px;
+      background: var(--chip-yellow);
+      top: -60px;
+      right: -40px;
+    }
+
+    .card::after {
+      width: 200px;
+      height: 200px;
+      background: var(--chip-blue);
+      bottom: -80px;
+      left: -60px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 1.8rem;
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+
+    .sub-title {
+      text-align: center;
+      color: var(--text-sub);
+      margin-bottom: 16px;
+      font-size: 0.9rem;
+    }
+
+    .character-banner {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    .character-img {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background-size: cover;
+      background-position: center;
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+      border: 3px solid #fff;
+    }
+
+    .character-img.pokemon {
+      background-image: url("ポケモン.png");
+    }
+
+    .character-img.chiikawa {
+      background-image: url("ちいかわ.png");
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .chip {
+      font-size: 0.8rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(0, 0, 0, 0.04);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .controls-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    label {
+      font-size: 0.9rem;
+      color: var(--text-sub);
+    }
+
+    select {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid #d0d7e2;
+      font-size: 1rem;
+      min-width: 150px;
+      background: #fff;
+    }
+
+    button {
+      cursor: pointer;
+      border-radius: 999px;
+      border: none;
+      padding: 12px 24px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      min-width: 120px;
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(43, 124, 255, 0.35);
+      transition: transform 0.05s ease, box-shadow 0.05s ease,
+        background 0.15s ease;
+      touch-action: manipulation;
+    }
+
+    button.secondary {
+      background: #e0e4ee;
+      color: #333;
+      box-shadow: none;
+    }
+
+    button:active {
+      transform: translateY(1px) scale(0.99);
+      box-shadow: 0 2px 8px rgba(43, 124, 255, 0.22);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+      box-shadow: none;
+    }
+
+    .prompt-area {
+      background: var(--accent-soft);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      font-size: 1.1rem;
+      line-height: 1.5;
+    }
+
+    .prompt-label {
+      font-size: 0.85rem;
+      color: var(--text-sub);
+      margin-bottom: 4px;
+    }
+
+    .typing-area {
+      margin-top: 8px;
+      margin-bottom: 12px;
+    }
+
+    .typing-input {
+      width: 100%;
+      font-size: 1.2rem;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #ccd3e0;
+    }
+
+    .typing-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(43, 124, 255, 0.18);
+    }
+
+    .visual-feedback {
+      min-height: 48px;
+      margin-top: 8px;
+      font-size: 1.1rem;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .char-correct {
+      color: var(--ok);
+    }
+
+    .char-wrong {
+      color: var(--ng);
+      text-decoration: underline;
+    }
+
+    .char-untyped {
+      color: #aaa;
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #dde2ee;
+    }
+
+    .stat-box {
+      flex: 1 1 140px;
+      background: #f7f9fd;
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-sub);
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    .message {
+      margin-top: 8px;
+      font-size: 0.95rem;
+      color: var(--text-sub);
+    }
+
+    .message.success {
+      color: var(--ok);
+      font-weight: 600;
+    }
+
+    .message.error {
+      color: var(--ng);
+      font-weight: 600;
+    }
+
+    @media (max-width: 600px) {
+      h1 {
+        font-size: 1.4rem;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      button {
+        min-width: 140px;
+        padding: 14px 24px;
+        font-size: 1.1rem;
+      }
+
+      select {
+        min-width: 160px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>みかちゅうタイピング</h1>
+      <div class="sub-title">ポケモン と ちいかわ といっしょにタイピングれんしゅう！</div>
+
+      <div class="character-banner">
+        <div class="character-img pokemon" aria-label="ポケモンキャラクター"></div>
+        <div class="character-img chiikawa" aria-label="ちいかわキャラクター"></div>
+      </div>
+
+      <div class="chip-row">
+        <div class="chip">全10問れんぞくチャレンジ</div>
+        <div class="chip">むずかしさ：かんたん / ふつう / ハード</div>
+        <div class="chip">にほんご と えいご に対応</div>
+      </div>
+
+      <div class="controls">
+        <div class="controls-group">
+          <label for="modeSelect">お題の種類</label>
+          <select id="modeSelect">
+            <option value="jp">日本語</option>
+            <option value="en">英語</option>
+          </select>
+        </div>
+        <div class="controls-group">
+          <label for="difficultySelect">難易度</label>
+          <select id="difficultySelect">
+            <option value="easy">簡単（120秒）</option>
+            <option value="normal" selected>普通（60秒）</option>
+            <option value="hard">ハード（30秒）</option>
+          </select>
+        </div>
+        <div class="controls-group">
+          <button id="startBtn">スタート</button>
+          <button id="resetBtn" class="secondary">リセット</button>
+        </div>
+      </div>
+
+      <div class="prompt-label" id="questionInfo">第0問 / 全10問</div>
+      <div class="prompt-label">お題</div>
+      <div class="prompt-area" id="promptText">「スタート」を押すとお題が表示されます。</div>
+
+      <div class="typing-area">
+        <div class="prompt-label">入力欄</div>
+        <input
+          id="typingInput"
+          class="typing-input"
+          type="text"
+          placeholder="ここに入力してください"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          disabled
+        />
+        <div class="visual-feedback" id="visualFeedback"></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat-box">
+          <div class="stat-label">タイピング速度（1分あたりの文字数）</div>
+          <div class="stat-value"><span id="speedValue">0</span> 文字/分</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">正確率</div>
+          <div class="stat-value"><span id="accuracyValue">0</span> %</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">入力文字数 / 正解数</div>
+          <div class="stat-value">
+            <span id="typedCount">0</span> / <span id="correctCount">0</span>
+          </div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">残り時間</div>
+          <div class="stat-value"><span id="timeLeft">60</span> 秒</div>
+        </div>
+      </div>
+
+      <div class="message" id="statusMessage"></div>
+    </div>
+  </div>
+
+  <script>
+    // 1セットの問題数
+    const TOTAL_QUESTIONS = 10;
+
+    // お題の例（日本語は表示用と入力用を分け、表示用にはふりがなを含める）
+    const prompts = {
+      jp: [
+        { display: "今日はいい天気ですね", input: "今日はいい天気ですね" },
+        { display: "毎日少しずつ練習しよう", input: "毎日少しずつ練習しよう" },
+        { display: "朝ごはんはしっかり食べよう", input: "朝ごはんはしっかり食べよう" },
+        { display: "水をたくさん飲みましょう", input: "水をたくさん飲みましょう" },
+        { display: "<ruby>早寝早起<rt>はやねはやお</rt></ruby>きを心がける", input: "早寝早起きを心がける" },
+        { display: "好きな音楽を聴いてリラックス", input: "好きな音楽を聴いてリラックス" },
+        { display: "本を読むと新しい発見がある", input: "本を読むと新しい発見がある" },
+        { display: "<ruby>散歩<rt>さんぽ</rt></ruby>をすると気分がすっきりする", input: "散歩をすると気分がすっきりする" },
+        { display: "<ruby>深呼吸<rt>しんこきゅう</rt></ruby>して心を落ち着かせる", input: "深呼吸して心を落ち着かせる" },
+        { display: "笑顔は周りの人も幸せにする", input: "笑顔は周りの人も幸せにする" },
+        { display: "失敗してもあきらめないことが大切", input: "失敗してもあきらめないことが大切" },
+        { display: "一歩ずつ前に進んでいこう", input: "一歩ずつ前に進んでいこう" },
+        { display: "友だちとの時間を大切にする", input: "友だちとの時間を大切にする" },
+        { display: "家族に感謝の気持ちを伝えよう", input: "家族に感謝の気持ちを伝えよう" },
+        { display: "小さな成功を喜ぼう", input: "小さな成功を喜ぼう" },
+        { display: "新しいことにチャレンジしてみる", input: "新しいことにチャレンジしてみる" },
+        { display: "目標を書き出してみよう", input: "目標を書き出してみよう" },
+        { display: "机の上をきれいに片付ける", input: "机の上をきれいに片付ける" },
+        { display: "部屋を掃除すると気持ちがいい", input: "部屋を掃除すると気持ちがいい" },
+        { display: "コーヒーを飲んで一息つく", input: "コーヒーを飲んで一息つく" },
+        { display: "画面から少し目を離して休憩する", input: "画面から少し目を離して休憩する" },
+        { display: "手を伸ばして軽くストレッチする", input: "手を伸ばして軽くストレッチする" },
+        { display: "外の空気を吸ってリフレッシュ", input: "外の空気を吸ってリフレッシュ" },
+        { display: "優しい言葉をたくさん使おう", input: "優しい言葉をたくさん使おう" },
+        { display: "感謝の言葉を素直に伝えよう", input: "感謝の言葉を素直に伝えよう" },
+        { display: "焦らずに自分のペースで進もう", input: "焦らずに自分のペースで進もう" },
+        { display: "できたところに目を向けてみる", input: "できたところに目を向けてみる" },
+        { display: "わからないことは質問してみる", input: "わからないことは質問してみる" },
+        { display: "丁寧な言葉づかいを心がける", input: "丁寧な言葉づかいを心がける" },
+        { display: "約束はしっかり守ろう", input: "約束はしっかり守ろう" },
+        { display: "時間には少し早めに行動する", input: "時間には少し早めに行動する" },
+        { display: "カレンダーに予定を書き込む", input: "カレンダーに予定を書き込む" },
+        { display: "大事なことはメモに残す", input: "大事なことはメモに残す" },
+        { display: "パソコンのファイルを整理する", input: "パソコンのファイルを整理する" },
+        { display: "<ruby>音量<rt>おんりょう</rt></ruby>を調整して周りに配慮する", input: "音量を調整して周りに配慮する" },
+        { display: "目標に向かってこつこつ努力する", input: "目標に向かってこつこつ努力する" },
+        { display: "疲れたら無理をせずに休む", input: "疲れたら無理をせずに休む" },
+        { display: "自分の気持ちを大切にしよう", input: "自分の気持ちを大切にしよう" },
+        { display: "相手の立場になって考えてみる", input: "相手の立場になって考えてみる" },
+        { display: "ゆっくり深呼吸して落ち着こう", input: "ゆっくり深呼吸して落ち着こう" },
+        { display: "今日の良かったことを書き出す", input: "今日の良かったことを書き出す" },
+        { display: "ポジティブな言葉を口にする", input: "ポジティブな言葉を口にする" },
+        { display: "新しい趣味を見つけてみよう", input: "新しい趣味を見つけてみよう" },
+        { display: "好きな映画をゆっくり楽しむ", input: "好きな映画をゆっくり楽しむ" },
+        { display: "音楽に合わせてリズムを取る", input: "音楽に合わせてリズムを取る" },
+        { display: "ゲームの時間を決めて遊ぶ", input: "ゲームの時間を決めて遊ぶ" },
+        { display: "スマホの見すぎに気をつける", input: "スマホの見すぎに気をつける" },
+        { display: "目を閉じて少し休んでみる", input: "目を閉じて少し休んでみる" },
+        { display: "歩くスピードを少しゆるめてみる", input: "歩くスピードを少しゆるめてみる" },
+        { display: "季節の変化を楽しんでみよう", input: "季節の変化を楽しんでみよう" },
+        { display: "空の色をゆっくり眺めてみる", input: "空の色をゆっくり眺めてみる" },
+        { display: "雲の形を想像してみる", input: "雲の形を想像してみる" },
+        { display: "風の音に耳をすませてみる", input: "風の音に耳をすませてみる" },
+        { display: "今日も一日よく頑張りました", input: "今日も一日よく頑張りました" },
+        { display: "まずはやってみることが大事", input: "まずはやってみることが大事" },
+        { display: "できない理由よりできる方法を探す", input: "できない理由よりできる方法を探す" },
+        { display: "新しい出会いを大切にしよう", input: "新しい出会いを大切にしよう" },
+        { display: "人の話を最後までよく聞く", input: "人の話を最後までよく聞く" },
+        { display: "相手の良いところを見つけてみる", input: "相手の良いところを見つけてみる" },
+        { display: "思いやりのある行動を心がける", input: "思いやりのある行動を心がける" },
+        { display: "挨拶は元気よくはっきり言う", input: "挨拶は元気よくはっきり言う" },
+        { display: "名前を呼んで話しかけてみる", input: "名前を呼んで話しかけてみる" },
+        { display: "相手の目を見て話を聞く", input: "相手の目を見て話を聞く" },
+        { display: "大きくうなずいて相槌を打つ", input: "大きくうなずいて相槌を打つ" },
+        { display: "ゆっくりはっきり話してみる", input: "ゆっくりはっきり話してみる" },
+        { display: "わからないときは聞き返そう", input: "わからないときは聞き返そう" },
+        { display: "できたことをしっかり褒めよう", input: "できたことをしっかり褒めよう" },
+        { display: "自分にも優しくしてあげよう", input: "自分にも優しくしてあげよう" },
+        { display: "心と体のバランスを大切にする", input: "心と体のバランスを大切にする" },
+        { display: "無理をしすぎないように気をつける", input: "無理をしすぎないように気をつける" },
+        { display: "楽しい時間を意識して作ろう", input: "楽しい時間を意識して作ろう" },
+        { display: "一日の終わりに深呼吸をする", input: "一日の終わりに深呼吸をする" },
+        { display: "たまには早く寝てみよう", input: "たまには早く寝てみよう" },
+        { display: "朝日を浴びて体を目覚めさせる", input: "朝日を浴びて体を目覚めさせる" },
+        { display: "ゆっくりお茶を飲んで休憩する", input: "ゆっくりお茶を飲んで休憩する" },
+        { display: "お気に入りの服を着て出かける", input: "お気に入りの服を着て出かける" },
+        { display: "写真を撮って思い出を残す", input: "写真を撮って思い出を残す" },
+        { display: "日記を書いて気持ちを整理する", input: "日記を書いて気持ちを整理する" },
+        { display: "今の気持ちを言葉にしてみる", input: "今の気持ちを言葉にしてみる" },
+        { display: "自分の成長に気づいてあげよう", input: "自分の成長に気づいてあげよう" },
+        { display: "少しずつでも前に進んでいる", input: "少しずつでも前に進んでいる" },
+        { display: "完璧じゃなくても大丈夫", input: "完璧じゃなくても大丈夫" },
+        { display: "助けを求めることは悪いことじゃない", input: "助けを求めることは悪いことじゃない" },
+        { display: "一緒に頑張ってくれる人がいる", input: "一緒に頑張ってくれる人がいる" },
+        { display: "頑張っている自分を認めてあげよう", input: "頑張っている自分を認めてあげよう" },
+        { display: "今日もここまで進めてえらい", input: "今日もここまで進めてえらい" },
+        { display: "ゆっくり丁寧にタイピングしてみよう", input: "ゆっくり丁寧にタイピングしてみよう" },
+        { display: "リズムよくキーを打ってみよう", input: "リズムよくキーを打ってみよう" },
+        { display: "指の位置を意識して練習しよう", input: "指の位置を意識して練習しよう" },
+        { display: "<ruby>盲打<rt>ブラインドタッチ</rt></ruby>に挑戦してみる", input: "ブラインドタッチに挑戦してみる" },
+        { display: "正確さを大事にしてタイピングする", input: "正確さを大事にしてタイピングする" },
+        { display: "慣れてきたらスピードを上げてみる", input: "慣れてきたらスピードを上げてみる" },
+        { display: "画面を見すぎないように意識する", input: "画面を見すぎないように意識する" },
+        { display: "姿勢を正してタイピングしてみよう", input: "姿勢を正してタイピングしてみよう" },
+        { display: "肩の力を抜いてリラックスする", input: "肩の力を抜いてリラックスする" },
+        { display: "タイマーがゼロになるまで集中しよう", input: "タイマーがゼロになるまで集中しよう" },
+        { display: "時間がきてもまた挑戦すればいい", input: "時間がきてもまた挑戦すればいい" },
+        { display: "少しずつ上達していく自分を楽しもう", input: "少しずつ上達していく自分を楽しもう" }
+      ],
+      en: [
+        { display: "hello world", input: "hello world" },
+        { display: "practice makes perfect", input: "practice makes perfect" },
+        { display: "typing is fun and useful", input: "typing is fun and useful" },
+        { display: "never stop learning new things", input: "never stop learning new things" },
+        { display: "code with clarity and simplicity", input: "code with clarity and simplicity" },
+        { display: "focus on accuracy before speed", input: "focus on accuracy before speed" },
+        { display: "consistency is the key to success", input: "consistency is the key to success" },
+        { display: "small steps lead to big changes", input: "small steps lead to big changes" }
+      ],
+    };
+
+    const modeSelect = document.getElementById("modeSelect");
+    const difficultySelect = document.getElementById("difficultySelect");
+    const startBtn = document.getElementById("startBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const promptText = document.getElementById("promptText");
+    const typingInput = document.getElementById("typingInput");
+    const visualFeedback = document.getElementById("visualFeedback");
+    const speedValue = document.getElementById("speedValue");
+    const accuracyValue = document.getElementById("accuracyValue");
+    const typedCountSpan = document.getElementById("typedCount");
+    const correctCountSpan = document.getElementById("correctCount");
+    const statusMessage = document.getElementById("statusMessage");
+    const timeLeftSpan = document.getElementById("timeLeft");
+    const questionInfo = document.getElementById("questionInfo");
+
+    let currentPrompt = "";
+    let started = false;
+    let startTime = null;
+    let finished = false;
+    let remainingTime = 0;
+    let timerId = null;
+    let currentQuestion = 0;
+    let sessionActive = false;
+
+    function getTimeLimitSeconds() {
+      const value = difficultySelect.value;
+      if (value === "easy") return 120;
+      if (value === "hard") return 30;
+      return 60; // normal
+    }
+
+    function pickRandomPrompt(mode) {
+      const list = prompts[mode] || prompts.jp;
+      const idx = Math.floor(Math.random() * list.length);
+      return list[idx];
+    }
+
+    function clearTimer() {
+      if (timerId !== null) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+    }
+
+    function updateQuestionInfo() {
+      questionInfo.textContent = `第${currentQuestion}問 / 全${TOTAL_QUESTIONS}問`;
+    }
+
+    function resetState(keepPrompt = false) {
+      sessionActive = false;
+      currentQuestion = 0;
+      updateQuestionInfo();
+
+      started = false;
+      finished = false;
+      startTime = null;
+      clearTimer();
+      remainingTime = getTimeLimitSeconds();
+      timeLeftSpan.textContent = String(remainingTime);
+
+      if (!keepPrompt) {
+        currentPrompt = "";
+        promptText.textContent = "「スタート」を押すとお題が表示されます。";
+      }
+
+      typingInput.value = "";
+      typingInput.disabled = true;
+      visualFeedback.innerHTML = "";
+      speedValue.textContent = "0";
+      accuracyValue.textContent = "0";
+      typedCountSpan.textContent = "0";
+      correctCountSpan.textContent = "0";
+      statusMessage.textContent = "";
+      statusMessage.className = "message";
+    }
+
+    function startTimer() {
+      clearTimer();
+      remainingTime = getTimeLimitSeconds();
+      timeLeftSpan.textContent = String(remainingTime);
+      timerId = setInterval(() => {
+        if (remainingTime <= 0) {
+          clearTimer();
+          handleTimeUp();
+          return;
+        }
+        remainingTime -= 1;
+        timeLeftSpan.textContent = String(remainingTime);
+      }, 1000);
+    }
+
+    function handleTimeUp() {
+      if (finished) return;
+      finished = true;
+      typingInput.disabled = true;
+      statusMessage.textContent = "時間終了！次の問題に進みます。";
+      statusMessage.className = "message error";
+      setTimeout(nextQuestion, 800);
+    }
+
+    function loadQuestion() {
+      const mode = modeSelect.value;
+      const p = pickRandomPrompt(mode);
+      currentPrompt = p.input;
+      promptText.innerHTML = p.display;
+
+      typingInput.disabled = false;
+      typingInput.value = "";
+      typingInput.focus();
+      visualFeedback.innerHTML = "";
+
+      started = false;
+      finished = false;
+      startTime = null;
+      clearTimer();
+      remainingTime = getTimeLimitSeconds();
+      timeLeftSpan.textContent = String(remainingTime);
+
+      speedValue.textContent = "0";
+      accuracyValue.textContent = "0";
+      typedCountSpan.textContent = "0";
+      correctCountSpan.textContent = "0";
+
+      statusMessage.textContent =
+        "お題を入力してください。最初のキー入力から計測を開始します。";
+      statusMessage.className = "message";
+    }
+
+    function startPractice() {
+      sessionActive = true;
+      currentQuestion = 1;
+      updateQuestionInfo();
+      loadQuestion();
+    }
+
+    function nextQuestion() {
+      clearTimer();
+      if (!sessionActive) return;
+      if (currentQuestion >= TOTAL_QUESTIONS) {
+        typingInput.disabled = true;
+        statusMessage.textContent = "全ての問題が終了しました。おつかれさまでした。";
+        statusMessage.className = "message success";
+        return;
+      }
+      currentQuestion += 1;
+      updateQuestionInfo();
+      loadQuestion();
+    }
+
+    function updateVisualAndStats() {
+      const input = typingInput.value;
+      const target = currentPrompt;
+
+      let correct = 0;
+      let totalTyped = input.length;
+
+      const maxLen = Math.max(input.length, target.length);
+      const fragments = [];
+      for (let i = 0; i < maxLen; i++) {
+        const targetChar = target[i] ?? "";
+        const inputChar = input[i] ?? "";
+
+        if (!inputChar) {
+          if (targetChar) {
+            fragments.push(
+              `<span class="char-untyped">${escapeHtml(targetChar)}</span>`
+            );
+          }
+        } else if (!targetChar) {
+          fragments.push(
+            `<span class="char-wrong">${escapeHtml(inputChar)}</span>`
+          );
+        } else if (inputChar === targetChar) {
+          fragments.push(
+            `<span class="char-correct">${escapeHtml(targetChar)}</span>`
+          );
+          correct++;
+        } else {
+          fragments.push(
+            `<span class="char-wrong">${escapeHtml(inputChar)}</span>`
+          );
+        }
+      }
+
+      visualFeedback.innerHTML = fragments.join("");
+
+      correctCountSpan.textContent = String(correct);
+      typedCountSpan.textContent = String(totalTyped);
+
+      let accuracy = 0;
+      if (totalTyped > 0) {
+        accuracy = (correct / totalTyped) * 100;
+      }
+      accuracyValue.textContent = accuracy.toFixed(1);
+
+      const now = performance.now();
+      if (startTime && totalTyped > 0) {
+        const elapsedMs = now - startTime;
+        const elapsedMin = elapsedMs / 60000;
+        const speed = elapsedMin > 0 ? totalTyped / elapsedMin : 0;
+        speedValue.textContent = speed.toFixed(1);
+      } else {
+        speedValue.textContent = "0";
+      }
+
+      if (!finished && input.length > 0 && input === target) {
+        finished = true;
+        clearTimer();
+        statusMessage.textContent = "クリア！次の問題に進みます。";
+        statusMessage.className = "message success";
+        typingInput.disabled = true;
+        setTimeout(nextQuestion, 800);
+      } else if (!finished && input.length > target.length) {
+        statusMessage.textContent =
+          "お題より多く入力しています。バックスペースで修正してください。";
+        statusMessage.className = "message error";
+      } else if (!finished && input.length > 0) {
+        statusMessage.textContent = "途中です。正しく入力できているか確認しましょう。";
+        statusMessage.className = "message";
+      }
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // イベント設定
+    startBtn.addEventListener("click", () => {
+      startPractice();
+    });
+
+    resetBtn.addEventListener("click", () => {
+      resetState(false);
+    });
+
+    typingInput.addEventListener("input", () => {
+      if (!currentPrompt || finished) return;
+      if (!started) {
+        started = true;
+        startTime = performance.now();
+        startTimer();
+      }
+      updateVisualAndStats();
+    });
+
+    // 初期化
+    resetState(true);
+  </script>
+</body>
+</html>
