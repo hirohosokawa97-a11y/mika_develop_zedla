@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ラーメン屋ゲーム</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', 'Yu Gothic', sans-serif;
+  overflow: hidden;
+}
+#wrap { position: relative; }
+canvas { display: block; border: 3px solid #e94560; border-radius: 4px; }
+
+#actionBtn {
+  position: absolute;
+  display: none;
+  background: #e94560;
+  color: white;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 25px;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(233,69,96,0.6);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: all;
+}
+#actionBtn:hover { background: #c73050; }
+
+#soupPanel {
+  position: absolute;
+  display: none;
+  background: rgba(8,8,28,0.97);
+  border: 2px solid #e94560;
+  border-radius: 12px;
+  padding: 16px 18px;
+  z-index: 20;
+  min-width: 190px;
+}
+#soupPanel h3 {
+  color: #FFD700;
+  text-align: center;
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+.soupBtn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 5px 0;
+  padding: 9px 14px;
+  background: #16213e;
+  color: white;
+  border: 1px solid #e94560;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.soupBtn:hover { background: #e94560; }
+.soupBtn .key-hint { color: #aaa; font-size: 11px; margin-left: auto; }
+
+#uberNotif {
+  position: absolute;
+  display: none;
+  background: #0a1e0a;
+  border: 2px solid #00ff88;
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: white;
+  font-size: 13px;
+  z-index: 15;
+  min-width: 155px;
+  right: 5px;
+  top: 115px;
+}
+#uberNotif .ut { color: #00ff88; font-weight: bold; font-size: 14px; margin-bottom: 3px; }
+#uberTimer { color: #aaa; font-size: 11px; margin-top: 4px; }
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+#overlayBox {
+  background: #0f3460;
+  border: 3px solid #e94560;
+  border-radius: 16px;
+  padding: 50px 65px;
+  text-align: center;
+  color: white;
+}
+#overlayTitle { font-size: 52px; margin-bottom: 14px; }
+#overlayMsg { font-size: 22px; margin-bottom: 30px; color: #FFD700; }
+#overlayBtn {
+  background: #e94560;
+  color: white;
+  border: none;
+  padding: 13px 40px;
+  border-radius: 10px;
+  font-size: 19px;
+  cursor: pointer;
+  font-weight: bold;
+}
+#overlayBtn:hover { background: #c73050; }
+
+#feedback {
+  position: absolute;
+  display: none;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #FFD700;
+  font-size: 20px;
+  font-weight: bold;
+  text-shadow: 2px 2px 6px rgba(0,0,0,0.9);
+  z-index: 50;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.4s;
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" width="1000" height="700"></canvas>
+
+  <button id="actionBtn">アクション [Enter]</button>
+
+  <div id="soupPanel">
+    <h3>スープを選択</h3>
+    <button class="soupBtn" data-soup="shoyu">🟤 醤油 <span class="key-hint">[1]</span></button>
+    <button class="soupBtn" data-soup="miso">🟠 味噌 <span class="key-hint">[2]</span></button>
+    <button class="soupBtn" data-soup="shio">⚪ 塩 <span class="key-hint">[3]</span></button>
+    <button class="soupBtn" data-soup="tonkotsu">🟡 豚骨 <span class="key-hint">[4]</span></button>
+  </div>
+
+  <div id="uberNotif">
+    <div class="ut">📱 Uber Eats 注文！</div>
+    <div id="uberOrder"></div>
+    <div id="uberTimer"></div>
+  </div>
+
+  <div id="overlay">
+    <div id="overlayBox">
+      <div id="overlayTitle"></div>
+      <div id="overlayMsg"></div>
+      <button id="overlayBtn">もう一度プレイ</button>
+    </div>
+  </div>
+
+  <div id="feedback"></div>
+</div>
+
+<script>
+'use strict';
+
+// ══════════════════════════════════════
+//  定数
+// ══════════════════════════════════════
+const CW = 1000, CH = 700;
+const HUD_H = 110;
+const COUNTER_Y = 200;
+const COUNTER_H = 25;
+const KITCHEN_Y = COUNTER_Y + COUNTER_H; // 225
+
+const SOUP = {
+  shoyu:    { name: '醤油', col: '#8B4513', toppings: ['メンマ', 'ナルト'] },
+  miso:     { name: '味噌', col: '#CD853F', toppings: ['人参', 'もやし', 'チャーシュー', 'コーン'] },
+  shio:     { name: '塩',   col: '#DAD5A0', toppings: ['人参', 'ネギ', 'チャーシュー'] },
+  tonkotsu: { name: '豚骨', col: '#FFF5DC', toppings: ['ネギ', 'のり', 'チャーシュー'] },
+};
+const SOUP_KEYS = Object.keys(SOUP);
+
+const NUM_SEATS = 7;
+const SEAT_X0 = 95;
+const SEAT_DX = 120;
+const SEAT_Y = 148;
+
+// ステーション
+const ST = {
+  bowl:   { x: 130, y: 470, w: 90, h: 80, label: '丼置き場',  emoji: '🥣' },
+  soup:   { x: 300, y: 470, w: 90, h: 80, label: 'スープ鍋',  emoji: '🍲' },
+  noodle: { x: 470, y: 470, w: 90, h: 80, label: '麺茹で鍋', emoji: '🥘' },
+  pickup: { x: 845, y: 340, w: 90, h: 80, label: '受け取り口', emoji: '📦' },
+  trash:  { x: 640, y: 470, w: 90, h: 80, label: '捨て場',     emoji: '🗑️' },
+};
+const INTERACT_D = 85;
+const PRICE = 1000;
+let T_MIN = 40, T_MAX = 70;
+
+// ══════════════════════════════════════
+//  難易度設定
+// ══════════════════════════════════════
+const DIFF_SETTINGS = {
+  easy: {
+    label: 'かんたん', color: '#00cc55', emoji: '🌱',
+    tMin: 55, tMax: 90, spawnI: 13,
+    desc: ['お客さんのタイマーが長い', 'ゆっくりペースで練習できる'],
+    missions: [
+      { text: '醤油ラーメンを1杯作る',         check: g => g.shoyu    >= 1 },
+      { text: '味噌ラーメンを2杯作る',         check: g => g.miso     >= 2 },
+      { text: '売上¥5,000を達成する',          check: (g,s) => s >= 5000 },
+      { text: 'お客を帰らせずに3杯提供する', check: g => g.streak   >= 3 },
+      { text: '豚骨ラーメンを1杯作る',         check: g => g.tonkotsu >= 1 },
+    ],
+  },
+  normal: {
+    label: 'ふつう', color: '#FFD700', emoji: '🍜',
+    tMin: 40, tMax: 70, spawnI: 9,
+    desc: ['標準的な難しさ', 'タイマーもペースも普通'],
+    missions: [
+      { text: '醤油ラーメンを2杯作る',         check: g => g.shoyu    >= 2 },
+      { text: '味噌ラーメンを3杯作る',         check: g => g.miso     >= 3 },
+      { text: '売上¥10,000を達成する',         check: (g,s) => s >= 10000 },
+      { text: 'お客を帰らせずに5杯提供する', check: g => g.streak   >= 5 },
+      { text: '豚骨ラーメンを2杯作る',         check: g => g.tonkotsu >= 2 },
+    ],
+  },
+  hard: {
+    label: 'むずかしい', color: '#e94560', emoji: '🔥',
+    tMin: 22, tMax: 40, spawnI: 6,
+    desc: ['タイマーが短くお客が多い', 'ミッションも高難度'],
+    missions: [
+      { text: '醤油ラーメンを3杯作る',         check: g => g.shoyu    >= 3 },
+      { text: '味噌ラーメンを5杯作る',         check: g => g.miso     >= 5 },
+      { text: '売上¥20,000を達成する',         check: (g,s) => s >= 20000 },
+      { text: 'お客を帰らせずに8杯提供する', check: g => g.streak   >= 8 },
+      { text: '豚骨ラーメンを3杯作る',         check: g => g.tonkotsu >= 3 },
+    ],
+  },
+};
+
+// ══════════════════════════════════════
+//  ミッション（難易度選択後に設定）
+// ══════════════════════════════════════
+let MISSIONS = [];
+
+// ══════════════════════════════════════
+//  チュートリアル
+// ══════════════════════════════════════
+const TUT_STEPS = [
+  { msg: '① 矢印キー（↑↓←→）でシェフを動かしてみよう！', target: null },
+  { msg: '② 🥣 丼置き場に近づいて [Enter] を押して丼を取ろう！', target: 'bowl' },
+  { msg: '③ 🍲 スープ鍋に近づいて [Enter] → スープを選ぼう！', target: 'soup' },
+  { msg: '④ 🥘 麺茹で鍋に近づいて [Enter] で麺を入れよう！', target: 'noodle' },
+  { msg: '⑤ 🗑️ 捨て場に近づいて [Enter] → 間違えた時はここで捨てよう！', target: 'trash' },
+];
+const TUT = { active: false, step: 0, done: false, moved: false };
+
+// ══════════════════════════════════════
+//  ゲーム状態
+// ══════════════════════════════════════
+const G = {
+  running: false,
+  clear: false,
+  diff: null, // 'easy' | 'normal' | 'hard'
+  sales: 0,
+  customers: [],
+  custId: 1,
+  spawnT: 4,
+  spawnI: 9,
+  uber: null,
+  uberSpawnT: 25,
+  uberSpawnI: 32,
+  stats: { shoyu: 0, miso: 0, shio: 0, tonkotsu: 0, streak: 0 },
+};
+
+// ══════════════════════════════════════
+//  プレイヤー
+// ══════════════════════════════════════
+const P = {
+  x: 500, y: 370,
+  w: 36, h: 36,
+  spd: 195,
+  holding: null,
+};
+
+// ══════════════════════════════════════
+//  入力
+// ══════════════════════════════════════
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doAction(); }
+  if (soupOpen) {
+    if (e.key === '1') selectSoup('shoyu');
+    if (e.key === '2') selectSoup('miso');
+    if (e.key === '3') selectSoup('shio');
+    if (e.key === '4') selectSoup('tonkotsu');
+    if (e.key === 'Escape') closeSoup();
+  }
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// ══════════════════════════════════════
+//  近接判定
+// ══════════════════════════════════════
+function pCX() { return P.x + P.w / 2; }
+function pCY() { return P.y + P.h / 2; }
+
+function nearSt(key) {
+  const s = ST[key];
+  const cx = Math.max(s.x, Math.min(pCX(), s.x + s.w));
+  const cy = Math.max(s.y, Math.min(pCY(), s.y + s.h));
+  return Math.hypot(pCX() - cx, pCY() - cy) < INTERACT_D;
+}
+
+function nearSeatIdx() {
+  for (let i = 0; i < NUM_SEATS; i++) {
+    const sx = SEAT_X0 + i * SEAT_DX + 40;
+    const sy = SEAT_Y + 22;
+    if (Math.hypot(pCX() - sx, pCY() - sy) < 92) return i;
+  }
+  return -1;
+}
+
+// ══════════════════════════════════════
+//  アクション
+// ══════════════════════════════════════
+function doAction() {
+  if (!G.running && !TUT.active && !G.clear) { startGame(); return; }
+  if (G.clear) return;
+  if (soupOpen) { closeSoup(); return; }
+
+  const h = P.holding;
+
+  if (nearSt('bowl') && !h) {
+    P.holding = 'bowl';
+    fb('🥣 丼を取りました！');
+    if (TUT.active && TUT.step === 1) advanceTut();
+    return;
+  }
+  if (nearSt('soup') && h === 'bowl') {
+    openSoup();
+    return;
+  }
+  if (nearSt('noodle') && h && typeof h === 'object' && h.state === 'soup') {
+    P.holding = { soup: h.soup, state: 'ramen' };
+    fb('🍜 ' + SOUP[h.soup].name + 'ラーメン完成！');
+    if (TUT.active && TUT.step === 3) advanceTut();
+    return;
+  }
+  if (nearSt('trash') && h) {
+    P.holding = null;
+    fb('🗑️ 捨てました');
+    if (TUT.active && TUT.step === 4) advanceTut();
+    return;
+  }
+  if (!TUT.active && nearSt('pickup') && h && typeof h === 'object' && h.state === 'ramen') {
+    if (G.uber) {
+      if (G.uber.soup === h.soup) {
+        uberDone();
+      } else {
+        fb('❌ 注文は「' + SOUP[G.uber.soup].name + '」です！');
+      }
+    } else {
+      fb('Uber注文がありません');
+    }
+    return;
+  }
+  if (!TUT.active) {
+    const si = nearSeatIdx();
+    if (si >= 0 && h && typeof h === 'object' && h.state === 'ramen') {
+      const c = G.customers.find(c => c.si === si && c.waiting);
+      if (c) {
+        if (c.order === h.soup) serve(c);
+        else fb('❌ 注文は「' + SOUP[c.order].name + '」です！');
+      }
+    }
+  }
+}
+
+// ══════════════════════════════════════
+//  スープパネル
+// ══════════════════════════════════════
+const soupPanel = document.getElementById('soupPanel');
+let soupOpen = false;
+
+function openSoup() {
+  const s = ST.soup;
+  soupPanel.style.left = (s.x + s.w / 2 - 95) + 'px';
+  soupPanel.style.top  = (s.y - 230) + 'px';
+  soupPanel.style.display = 'block';
+  soupOpen = true;
+}
+function closeSoup() {
+  soupPanel.style.display = 'none';
+  soupOpen = false;
+}
+function selectSoup(key) {
+  P.holding = { soup: key, state: 'soup' };
+  fb('🍲 ' + SOUP[key].name + 'スープを入れました！');
+  closeSoup();
+  if (TUT.active && TUT.step === 2) advanceTut();
+}
+document.querySelectorAll('.soupBtn').forEach(btn => {
+  btn.addEventListener('click', () => selectSoup(btn.dataset.soup));
+});
+
+// ══════════════════════════════════════
+//  アクションボタン
+// ══════════════════════════════════════
+const actionBtn = document.getElementById('actionBtn');
+actionBtn.addEventListener('click', doAction);
+
+function updateActionBtn() {
+  if ((!G.running && !TUT.active) || G.clear || soupOpen) { actionBtn.style.display = 'none'; return; }
+  const h = P.holding;
+  let label = null, bx = 0, by = 0;
+
+  if (nearSt('bowl') && !h) {
+    label = '🥣 丼を取る [Enter]';
+    bx = ST.bowl.x + ST.bowl.w / 2; by = ST.bowl.y - 18;
+  } else if (nearSt('soup') && h === 'bowl') {
+    label = '🍲 スープを選ぶ [Enter]';
+    bx = ST.soup.x + ST.soup.w / 2; by = ST.soup.y - 18;
+  } else if (nearSt('noodle') && h && typeof h === 'object' && h.state === 'soup') {
+    label = '🥘 麺を入れる [Enter]';
+    bx = ST.noodle.x + ST.noodle.w / 2; by = ST.noodle.y - 18;
+  } else if (nearSt('pickup') && h && typeof h === 'object' && h.state === 'ramen' && G.uber) {
+    label = '📦 ウーバーに渡す [Enter]';
+    bx = ST.pickup.x + ST.pickup.w / 2; by = ST.pickup.y - 18;
+  } else if (nearSt('trash') && h) {
+    label = '🗑️ 捨てる [Enter]';
+    bx = ST.trash.x + ST.trash.w / 2; by = ST.trash.y - 18;
+  } else {
+    const si = nearSeatIdx();
+    if (si >= 0 && h && typeof h === 'object' && h.state === 'ramen') {
+      const c = G.customers.find(c => c.si === si && c.waiting);
+      if (c) {
+        label = '🍜 配膳する [Enter]';
+        bx = SEAT_X0 + si * SEAT_DX + 40;
+        by = SEAT_Y - 22;
+      }
+    }
+  }
+
+  if (label) {
+    actionBtn.style.display = 'block';
+    actionBtn.textContent = label;
+    actionBtn.style.left = bx + 'px';
+    actionBtn.style.top  = by + 'px';
+  } else {
+    actionBtn.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════
+//  ゲームロジック
+// ══════════════════════════════════════
+function startGame() {
+  if (!G.diff) return; // 難易度未選択なら無視
+  // 難易度を適用
+  const d = DIFF_SETTINGS[G.diff];
+  T_MIN = d.tMin; T_MAX = d.tMax;
+  G.spawnI = d.spawnI;
+  MISSIONS.length = 0;
+  d.missions.forEach(m => MISSIONS.push({ text: m.text, check: m.check, done: false }));
+  // チュートリアル開始
+  TUT.active = true;
+  TUT.step = 0;
+  TUT.done = false;
+  TUT.moved = false;
+}
+
+function startActualGame() {
+  TUT.active = false;
+  TUT.done = true;
+  P.holding = null;
+  G.running = true;
+  G.spawnT = 4;
+  fb('🏪 開店！ようこそ！', 2500);
+}
+
+function advanceTut() {
+  TUT.step++;
+  if (TUT.step >= TUT_STEPS.length) {
+    // チュートリアル完了
+    fb('✅ チュートリアル完了！ゲームを開始します！', 2000);
+    setTimeout(startActualGame, 2200);
+  }
+}
+
+function spawnCust() {
+  const free = [];
+  for (let i = 0; i < NUM_SEATS; i++) {
+    if (!G.customers.some(c => c.si === i && !c.done)) free.push(i);
+  }
+  if (!free.length) return;
+  const si = free[Math.floor(Math.random() * free.length)];
+  const order = SOUP_KEYS[Math.floor(Math.random() * SOUP_KEYS.length)];
+  const t = T_MIN + Math.random() * (T_MAX - T_MIN);
+  G.customers.push({ id: G.custId++, si, order, timer: t, maxTimer: t, waiting: true, done: false });
+}
+
+function serve(c) {
+  c.waiting = false; c.done = true;
+  P.holding = null;
+  G.sales += PRICE;
+  G.stats[c.order]++;
+  G.stats.streak++;
+  checkMissions();
+  fb('✓ ' + SOUP[c.order].name + 'ラーメン提供！ +¥' + PRICE);
+  setTimeout(() => { G.customers = G.customers.filter(x => x.id !== c.id); }, 1800);
+}
+
+function leave(c) {
+  c.waiting = false; c.done = true;
+  G.sales = Math.max(0, G.sales - PRICE);
+  G.stats.streak = 0;
+  fb('😤 お客様が帰りました… -¥' + PRICE);
+  setTimeout(() => { G.customers = G.customers.filter(x => x.id !== c.id); }, 1400);
+}
+
+function uberDone() {
+  const soup = G.uber.soup;
+  G.uber = null;
+  P.holding = null;
+  G.sales += PRICE;
+  G.stats[soup]++;
+  G.stats.streak++;
+  document.getElementById('uberNotif').style.display = 'none';
+  checkMissions();
+  fb('🛵 Uber配達完了！ +¥' + PRICE);
+}
+
+function spawnUber() {
+  const soup = SOUP_KEYS[Math.floor(Math.random() * SOUP_KEYS.length)];
+  G.uber = { soup, timer: 90, maxTimer: 90 };
+  document.getElementById('uberOrder').textContent = SOUP[soup].name + 'ラーメン';
+  document.getElementById('uberNotif').style.display = 'block';
+}
+
+function checkMissions() {
+  let newDone = false;
+  MISSIONS.forEach(m => {
+    if (!m.done && m.check(G.stats, G.sales)) {
+      m.done = true; newDone = true;
+      setTimeout(() => fb('🎉 ミッション「' + m.text + '」クリア！', 3200), 300);
+    }
+  });
+  if (newDone && MISSIONS.every(m => m.done)) {
+    setTimeout(showClear, 1600);
+  }
+}
+
+function showClear() {
+  G.running = false; G.clear = true;
+  document.getElementById('overlayTitle').textContent = '🎉 ゲームクリア！';
+  document.getElementById('overlayMsg').textContent = 'お疲れ様でした！ 売上: ¥' + G.sales.toLocaleString();
+  document.getElementById('overlay').style.display = 'flex';
+}
+
+document.getElementById('overlayBtn').addEventListener('click', () => location.reload());
+
+// ══════════════════════════════════════
+//  フィードバック
+// ══════════════════════════════════════
+const fbEl = document.getElementById('feedback');
+let fbTO = null;
+
+function fb(msg, dur = 2300) {
+  fbEl.textContent = msg;
+  fbEl.style.top = (CH / 2 - 90) + 'px';
+  fbEl.style.display = 'block';
+  fbEl.style.opacity = '1';
+  if (fbTO) clearTimeout(fbTO);
+  fbTO = setTimeout(() => {
+    fbEl.style.opacity = '0';
+    setTimeout(() => { fbEl.style.display = 'none'; }, 420);
+  }, dur - 420);
+}
+fbEl.style.transition = 'opacity 0.42s';
+
+// ══════════════════════════════════════
+//  描画
+// ══════════════════════════════════════
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function draw() {
+  ctx.clearRect(0, 0, CW, CH);
+  drawRestaurant();
+  drawStations();
+  drawSeats();
+  drawCustomers();
+  drawPlayer();
+  if (!G.running && !TUT.active && !G.clear) { drawStartHint(); drawDiffSelect(); }
+  drawHUD();
+  if (TUT.active) drawTutorial();
+}
+
+function drawDiffSelect() {
+  // 半透明オーバーレイ
+  ctx.fillStyle = 'rgba(0,0,10,0.62)';
+  ctx.fillRect(0, KITCHEN_Y, CW, CH - KITCHEN_Y);
+
+  // タイトル
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🎮 難易度を選んでください', CW / 2, KITCHEN_Y + 44);
+
+  // ボタン定義
+  const BW = 265, BH = 160, GAP = 17;
+  const totalW = BW * 3 + GAP * 2;
+  const bx0 = (CW - totalW) / 2;
+  const by0 = KITCHEN_Y + 60;
+  const diffKeys = ['easy', 'normal', 'hard'];
+
+  diffKeys.forEach((key, i) => {
+    const d = DIFF_SETTINGS[key];
+    const bx = bx0 + i * (BW + GAP);
+    const selected = G.diff === key;
+
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); roundRect(bx + 4, by0 + 4, BW, BH, 14); ctx.fill();
+
+    // 本体
+    ctx.fillStyle = selected ? d.color : 'rgba(20,20,50,0.92)';
+    ctx.strokeStyle = d.color;
+    ctx.lineWidth = selected ? 4 : 2;
+    if (selected) { ctx.shadowColor = d.color; ctx.shadowBlur = 18; }
+    ctx.beginPath(); roundRect(bx, by0, BW, BH, 14); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // 絵文字
+    ctx.font = '36px sans-serif';
+    ctx.fillText(d.emoji, bx + BW / 2, by0 + 50);
+
+    // ラベル
+    ctx.fillStyle = selected ? 'white' : d.color;
+    ctx.font = `bold ${key === 'hard' ? 20 : 22}px sans-serif`;
+    ctx.fillText(d.label, bx + BW / 2, by0 + 84);
+
+    // 説明
+    ctx.fillStyle = selected ? 'rgba(255,255,255,0.9)' : 'rgba(200,200,200,0.7)';
+    ctx.font = '11px sans-serif';
+    d.desc.forEach((line, li) => ctx.fillText(line, bx + BW / 2, by0 + 108 + li * 16));
+
+    // 選択マーク
+    if (selected) {
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('✓ 選択中', bx + BW / 2, by0 + 148);
+    }
+  });
+
+  ctx.textAlign = 'left';
+}
+
+function drawTutorial() {
+  if (TUT.step >= TUT_STEPS.length) {
+    // 完了アニメーション中
+    const py = CH - 118;
+    ctx.fillStyle = 'rgba(5,5,25,0.92)';
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); roundRect(8, py, CW - 16, 108, 10); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#00ff88';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('✅ チュートリアル完了！ゲームを開始します…', CW / 2, py + 60);
+    ctx.textAlign = 'left';
+    return;
+  }
+  const step = TUT_STEPS[TUT.step];
+  const t = Date.now() / 1000;
+
+  // 対象ステーションをハイライト
+  if (step.target) {
+    const s = ST[step.target];
+    const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+    const pulse = Math.sin(t * 4) * 10;
+    ctx.save();
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 24;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 52 + pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // プレイヤーから対象への矢印
+    const px = P.x + P.w / 2, py = P.y + P.h / 2;
+    const dx = cx - px, dy = cy - py;
+    const len = Math.hypot(dx, dy);
+    if (len > 80) {
+      const ux = dx / len, uy = dy / len;
+      const ax = px + ux * 55, ay = py + uy * 55;
+      const bx = cx - ux * 60, by = cy - uy * 60;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,215,0,' + (0.5 + 0.5 * Math.sin(t * 5)) + ')';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 6]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.setLineDash([]);
+      // 矢印頭
+      const angle = Math.atan2(dy, dx);
+      ctx.fillStyle = '#FFD700';
+      ctx.translate(bx, by);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(-14, -7); ctx.lineTo(-14, 7);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // 下部パネル
+  const py = CH - 118, ph = 108;
+  ctx.fillStyle = 'rgba(5,5,25,0.92)';
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); roundRect(8, py, CW - 16, ph, 10); ctx.fill(); ctx.stroke();
+
+  // ステップ数
+  ctx.fillStyle = '#e94560';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('TUTORIAL', 22, py + 20);
+  ctx.fillStyle = '#aaa';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('ステップ ' + (TUT.step + 1) + ' / ' + TUT_STEPS.length, CW - 20, py + 20);
+
+  // 指示テキスト
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(step.msg, CW / 2, py + 52);
+
+  // ヒント
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(TUT.step === 0 ? '矢印キーを押してみよう' : 'ステーションに近づいて [Enter] を押そう', CW / 2, py + 78);
+
+  // スキップボタン
+  ctx.fillStyle = 'rgba(80,80,80,0.8)';
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); roundRect(CW - 125, py + 68, 110, 28, 6); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#bbb';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('スキップ →', CW - 70, py + 87);
+  ctx.textAlign = 'left';
+}
+
+function drawRestaurant() {
+  // 店内外壁
+  ctx.fillStyle = '#3d1800';
+  ctx.fillRect(0, HUD_H, CW, COUNTER_Y - HUD_H);
+
+  // お客さんエリア床
+  for (let x = 0; x < CW; x += 45) {
+    ctx.fillStyle = (Math.floor(x / 45) % 2 === 0) ? '#4a1f00' : '#3d1800';
+    ctx.fillRect(x, HUD_H, 45, COUNTER_Y - HUD_H);
+  }
+
+  // 厨房床
+  ctx.fillStyle = '#e8d5b0';
+  ctx.fillRect(0, KITCHEN_Y, CW, CH - KITCHEN_Y);
+  ctx.strokeStyle = '#d4bf98';
+  ctx.lineWidth = 0.6;
+  for (let x = 0; x < CW; x += 50) {
+    for (let y = KITCHEN_Y; y < CH; y += 50) {
+      ctx.strokeRect(x, y, 50, 50);
+    }
+  }
+
+  // カウンター台
+  ctx.fillStyle = '#5a3010';
+  ctx.fillRect(90, COUNTER_Y, CW - 180, COUNTER_H);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fillRect(90, COUNTER_Y, CW - 180, 5);
+  ctx.fillStyle = '#3d2008';
+  ctx.fillRect(90, COUNTER_Y + COUNTER_H, CW - 180, 6);
+
+  // 左壁（食券機エリア）
+  ctx.fillStyle = '#2a1200';
+  ctx.fillRect(0, HUD_H, 92, CH - HUD_H);
+
+  // 右壁（受け取り口側）
+  ctx.fillStyle = '#2a1200';
+  ctx.fillRect(CW - 92, KITCHEN_Y, 92, CH - KITCHEN_Y);
+
+  // のれん
+  const norenW = 52, norenH = 72;
+  const norenColors = ['#c82040', '#a01030', '#c82040'];
+  for (let i = 0; i < 8; i++) {
+    const nx = 95 + i * 104;
+    if (nx + norenW > CW - 92) break;
+    ctx.fillStyle = norenColors[i % norenColors.length];
+    ctx.fillRect(nx, HUD_H, norenW, norenH);
+    // のれん文字
+    ctx.fillStyle = 'rgba(255,255,200,0.85)';
+    ctx.font = 'bold 18px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('麺', nx + norenW / 2, HUD_H + 44);
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(nx + norenW, HUD_H, 4, norenH);
+  }
+  ctx.textAlign = 'left';
+
+  // 食券機（装飾）
+  ctx.fillStyle = '#1a3060';
+  ctx.fillRect(12, 122, 68, 72);
+  ctx.fillStyle = '#2040a0';
+  ctx.fillRect(18, 128, 56, 44);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('食券機', 46, 145);
+  ctx.fillStyle = '#00ff88';
+  ctx.fillRect(22, 150, 50, 16);
+  ctx.fillStyle = '#0a0a0a';
+  ctx.font = '9px sans-serif';
+  ctx.fillText('自動注文', 47, 161);
+  ctx.textAlign = 'left';
+
+  // 天井ランプ
+  [200, 430, 660].forEach(lx => {
+    ctx.fillStyle = 'rgba(255,230,100,0.12)';
+    ctx.beginPath(); ctx.arc(lx, 116, 45, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath(); ctx.arc(lx, 116, 10, 0, Math.PI * 2); ctx.fill();
+  });
+}
+
+function drawStations() {
+  Object.entries(ST).forEach(([key, s]) => {
+    const near = nearSt(key);
+    // 影
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(s.x + 5, s.y + 5, s.w, s.h);
+    // 本体
+    ctx.fillStyle = near ? '#fff5d0' : '#f0e4c0';
+    ctx.fillRect(s.x, s.y, s.w, s.h);
+    ctx.strokeStyle = near ? '#FFD700' : '#9a7030';
+    ctx.lineWidth = near ? 3 : 2;
+    if (near) {
+      ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 14;
+    }
+    ctx.strokeRect(s.x, s.y, s.w, s.h);
+    ctx.shadowBlur = 0;
+    // 絵文字
+    ctx.font = '34px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(s.emoji, s.x + s.w / 2, s.y + s.h / 2 + 11);
+    // ラベル
+    ctx.fillStyle = '#555';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h + 16);
+    ctx.textAlign = 'left';
+  });
+}
+
+function drawSeats() {
+  for (let i = 0; i < NUM_SEATS; i++) {
+    const sx = SEAT_X0 + i * SEAT_DX;
+    // プレースマット
+    ctx.fillStyle = '#f0e070';
+    ctx.fillRect(sx + 5, COUNTER_Y + 3, 70, COUNTER_H - 6);
+    // スツール座面
+    ctx.fillStyle = '#7a4020';
+    ctx.beginPath();
+    ctx.ellipse(sx + 40, SEAT_Y + 48, 26, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // スツール脚
+    ctx.fillStyle = '#5a3010';
+    ctx.fillRect(sx + 36, SEAT_Y + 54, 8, 28);
+    // 台座
+    ctx.fillRect(sx + 24, SEAT_Y + 80, 32, 5);
+    // 席番号
+    ctx.fillStyle = '#ccc';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(i + 1, sx + 40, COUNTER_Y + 17);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawCustomers() {
+  G.customers.forEach(c => {
+    const sx = SEAT_X0 + c.si * SEAT_DX + 40;
+    const sy = SEAT_Y + 22;
+    const ratio = Math.max(0, c.timer / c.maxTimer);
+
+    // 体（スツールに座っている）
+    ctx.fillStyle = '#FFD39B';
+    ctx.beginPath(); ctx.arc(sx, sy, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#D4A870'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    // 髪
+    const hairCols = ['#1a1a1a', '#4a3020', '#8B4513', '#5c4020'];
+    ctx.fillStyle = hairCols[c.id % hairCols.length];
+    ctx.beginPath(); ctx.arc(sx, sy - 11, 22, Math.PI, 0); ctx.fill();
+
+    // 顔
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    if (c.done) {
+      ctx.fillText('😊', sx, sy + 7);
+    } else {
+      ctx.fillText(ratio > 0.45 ? '😊' : ratio > 0.2 ? '😟' : '😡', sx, sy + 7);
+    }
+    ctx.textAlign = 'left';
+
+    if (!c.done) {
+      // 吹き出し
+      const bx = sx, by = sy - 52;
+      ctx.fillStyle = 'white';
+      ctx.strokeStyle = '#e94560';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      roundRect(bx - 28, by - 20, 56, 22, 5);
+      ctx.fill(); ctx.stroke();
+      // しっぽ
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.moveTo(bx - 5, by + 2); ctx.lineTo(bx + 5, by + 2); ctx.lineTo(bx, by + 10);
+      ctx.closePath(); ctx.fill();
+      // 注文名
+      ctx.fillStyle = '#222';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(SOUP[c.order].name, bx, by - 4);
+      ctx.textAlign = 'left';
+
+      // タイマーバー
+      const bw = 68;
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(sx - bw / 2, by - 36, bw, 8);
+      ctx.fillStyle = ratio > 0.5 ? '#00cc55' : ratio > 0.22 ? '#FFD700' : '#e94560';
+      ctx.fillRect(sx - bw / 2, by - 36, bw * ratio, 8);
+
+      // 秒数
+      ctx.fillStyle = ratio < 0.22 ? '#e94560' : '#eee';
+      ctx.font = `bold ${ratio < 0.22 ? 12 : 10}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(Math.ceil(c.timer) + 's', sx, by - 39);
+      ctx.textAlign = 'left';
+    }
+  });
+}
+
+function drawPlayer() {
+  const px = P.x, py = P.y;
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.beginPath();
+  ctx.ellipse(px + P.w / 2, py + P.h + 3, 13, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // コック帽
+  ctx.fillStyle = 'white';
+  ctx.fillRect(px + 7, py - 13, P.w - 14, 9);
+  ctx.fillRect(px + 11, py - 20, P.w - 22, 9);
+  // 体
+  ctx.fillStyle = '#f0f0f0';
+  ctx.fillRect(px + 3, py + 12, P.w - 6, P.h - 10);
+  // コック絵文字
+  ctx.font = '26px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('👨‍🍳', px + P.w / 2, py + P.h);
+  ctx.textAlign = 'left';
+  // 持ち物
+  if (P.holding) {
+    let em = '🥣';
+    if (typeof P.holding === 'object') {
+      em = P.holding.state === 'ramen' ? '🍜' : '🥣';
+    }
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(em, px + P.w / 2 + 18, py - 6);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawHUD() {
+  // 背景
+  ctx.fillStyle = 'rgba(8,8,28,0.94)';
+  ctx.fillRect(0, 0, CW, HUD_H);
+  ctx.fillStyle = '#e94560';
+  ctx.fillRect(0, HUD_H - 3, CW, 3);
+
+  // 売上
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillText('💰 ¥' + G.sales.toLocaleString(), 14, 46);
+  // 難易度表示
+  if (G.diff) {
+    const d = DIFF_SETTINGS[G.diff];
+    ctx.fillStyle = d.color;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(d.emoji + ' ' + d.label, 14, 105);
+  }
+
+  // 持ち物
+  let holdStr = '（なし）';
+  if (P.holding === 'bowl') holdStr = '🥣 丼';
+  else if (P.holding && typeof P.holding === 'object') {
+    const sn = SOUP[P.holding.soup].name;
+    holdStr = P.holding.state === 'ramen' ? '🍜 ' + sn + 'ラーメン' : '🍲 ' + sn + 'スープ入り';
+  }
+  ctx.fillStyle = '#aaa';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('持ち物: ' + holdStr, 14, 67);
+  ctx.fillText('矢印キー移動 / Enterでアクション', 14, 84);
+  ctx.fillStyle = '#777';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('streak: ' + G.stats.streak + '杯', 14, 100);
+
+  // 開店ボタン（難易度選択後のみ表示）
+  if (!G.running && !TUT.active && !G.clear) {
+    if (G.diff) {
+      const dcol = DIFF_SETTINGS[G.diff].color;
+      ctx.fillStyle = dcol;
+      ctx.shadowColor = dcol; ctx.shadowBlur = 12;
+      roundRect(390, 10, 220, 46, 10);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 19px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🏪 開店！(クリック/Enter)', 500, 40);
+      // チュートリアル説明
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('開店！→ 矢印キーで移動 → Enter で各操作', 500, 64);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = '10px sans-serif';
+      ctx.fillText('画面下のパネルに指示が表示されます', 500, 78);
+      ctx.textAlign = 'left';
+    } else {
+      // 難易度未選択時は選択を促す
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      roundRect(390, 10, 220, 46, 10);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('← 難易度を選んでから開店', 500, 38);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // ミッション
+  const mx = 600;
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('📋 ミッション', mx, 22);
+  const cleared = MISSIONS.filter(m => m.done).length;
+  ctx.fillStyle = '#e94560';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(cleared + '/5 クリア', CW - 8, 22);
+  ctx.textAlign = 'left';
+
+  MISSIONS.forEach((m, i) => {
+    ctx.fillStyle = m.done ? '#00ff88' : 'rgba(255,255,255,0.82)';
+    ctx.font = (m.done ? 'bold ' : '') + '11.5px sans-serif';
+    ctx.fillText((m.done ? '✓ ' : '○ ') + m.text, mx, 38 + i * 17);
+  });
+}
+
+function drawStartHint() {
+  const t = Date.now() / 1000;
+  ctx.save();
+  ctx.globalAlpha = 0.72 + 0.28 * Math.sin(t * 2.8);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 21px sans-serif';
+  ctx.textAlign = 'center';
+  const msg = TUT.done
+    ? '↑ 「開店！」ボタンを押してゲームスタート ↑'
+    : '↑ 「開店！」ボタンを押してチュートリアルへ ↑';
+  ctx.fillText(msg, CW / 2, COUNTER_Y + 70);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+// roundRect ユーティリティ
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ══════════════════════════════════════
+//  メインループ
+// ══════════════════════════════════════
+let lastTs = 0;
+
+function loop(ts) {
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+
+  if ((G.running || TUT.active) && !G.clear) {
+    // プレイヤー移動
+    const spd = P.spd * dt;
+    const moved =
+      (keys['ArrowLeft'] || keys['a']) ||
+      (keys['ArrowRight'] || keys['d']) ||
+      (keys['ArrowUp'] || keys['w']) ||
+      (keys['ArrowDown'] || keys['s']);
+    if (keys['ArrowLeft']  || keys['a']) P.x -= spd;
+    if (keys['ArrowRight'] || keys['d']) P.x += spd;
+    if (keys['ArrowUp']    || keys['w']) P.y -= spd;
+    if (keys['ArrowDown']  || keys['s']) P.y += spd;
+    // 境界（厨房内）
+    P.x = Math.max(92, Math.min(CW - P.w - 5, P.x));
+    P.y = Math.max(KITCHEN_Y + 4, Math.min(CH - P.h - 5, P.y));
+
+    // チュートリアル：移動検知
+    if (TUT.active && TUT.step === 0 && moved && !TUT.moved) {
+      TUT.moved = true;
+      setTimeout(() => advanceTut(), 800);
+    }
+
+    // お客さんスポーン（チュートリアル中はスキップ）
+    if (TUT.active) { draw(); updateActionBtn(); requestAnimationFrame(loop); return; }
+    G.spawnT -= dt;
+    if (G.spawnT <= 0) {
+      if (Math.random() < 0.72) spawnCust();
+      G.spawnT = G.spawnI + Math.random() * 8;
+    }
+
+    // お客さんタイマー
+    G.customers.forEach(c => {
+      if (!c.waiting || c.done) return;
+      c.timer -= dt;
+      if (c.timer <= 0) leave(c);
+    });
+
+    // Uberスポーン
+    if (!G.uber) {
+      G.uberSpawnT -= dt;
+      if (G.uberSpawnT <= 0) {
+        if (Math.random() < 0.55) spawnUber();
+        G.uberSpawnT = G.uberSpawnI + Math.random() * 18;
+      }
+    } else {
+      G.uber.timer -= dt;
+      document.getElementById('uberTimer').textContent = '残り ' + Math.ceil(G.uber.timer) + '秒';
+      if (G.uber.timer <= 0) {
+        G.uber = null;
+        document.getElementById('uberNotif').style.display = 'none';
+        G.sales = Math.max(0, G.sales - PRICE);
+        fb('😱 Uber注文タイムアウト！ -¥' + PRICE);
+      }
+    }
+
+    // ミッション（売上系）
+    checkMissions();
+  }
+
+  draw();
+  updateActionBtn();
+  requestAnimationFrame(loop);
+}
+
+// canvasクリック（開店ボタン / チュートリアルスキップ）
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const scx = CW / rect.width, scy = CH / rect.height;
+  const mx = (e.clientX - rect.left) * scx;
+  const my = (e.clientY - rect.top) * scy;
+
+  // 開店前の操作
+  if (!G.running && !TUT.active && !G.clear) {
+    // 難易度ボタン判定
+    const BW = 265, BH = 160, GAP = 17;
+    const bx0 = (CW - (BW * 3 + GAP * 2)) / 2;
+    const by0 = KITCHEN_Y + 60;
+    ['easy', 'normal', 'hard'].forEach((key, i) => {
+      const bx = bx0 + i * (BW + GAP);
+      if (mx >= bx && mx <= bx + BW && my >= by0 && my <= by0 + BH) {
+        G.diff = key;
+      }
+    });
+    // 開店ボタン（難易度選択済みのみ）
+    if (G.diff && mx >= 390 && mx <= 610 && my >= 10 && my <= 56) startGame();
+    return;
+  }
+  // チュートリアル スキップボタン
+  if (TUT.active) {
+    const py = CH - 118;
+    if (mx >= CW - 125 && mx <= CW - 15 && my >= py + 68 && my <= py + 96) {
+      startActualGame();
+    }
+  }
+});
+
+requestAnimationFrame(ts => { lastTs = ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
