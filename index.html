@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>みかのWEBアプリギャラリー</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', 'Yu Gothic', sans-serif;
+  background: #f0f4ff;
+  color: #333;
+  min-height: 100vh;
+}
+
+/* ══ HEADER ══ */
+header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-align: center;
+  padding: 56px 20px 48px;
+  position: relative;
+  overflow: hidden;
+}
+header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.06'%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+header .badge {
+  display: inline-block;
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  letter-spacing: 0.05em;
+}
+header h1 {
+  font-size: clamp(26px, 5vw, 46px);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+  position: relative;
+}
+header p {
+  font-size: clamp(14px, 2.5vw, 18px);
+  opacity: 0.88;
+  position: relative;
+}
+.stars {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+}
+.star {
+  position: absolute;
+  font-size: 20px;
+  opacity: 0.18;
+  animation: twinkle 3s infinite alternate;
+}
+.star:nth-child(1) { top: 15%; left: 8%;  animation-delay: 0s; }
+.star:nth-child(2) { top: 25%; left: 88%; animation-delay: 0.6s; }
+.star:nth-child(3) { top: 65%; left: 5%;  animation-delay: 1.2s; }
+.star:nth-child(4) { top: 70%; left: 92%; animation-delay: 0.3s; }
+.star:nth-child(5) { top: 45%; left: 50%; animation-delay: 0.9s; }
+@keyframes twinkle {
+  from { opacity: 0.08; transform: scale(0.9); }
+  to   { opacity: 0.28; transform: scale(1.1); }
+}
+
+/* ══ MAIN ══ */
+main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px 60px;
+}
+
+/* ══ PROFILE ══ */
+.profile {
+  background: white;
+  border-radius: 20px;
+  padding: 36px 40px;
+  margin: -28px auto 48px;
+  max-width: 700px;
+  box-shadow: 0 8px 40px rgba(102,126,234,0.15);
+  position: relative;
+  text-align: center;
+}
+.profile .avatar {
+  font-size: 60px;
+  margin-bottom: 12px;
+  display: block;
+}
+.profile h2 {
+  font-size: 22px;
+  color: #667eea;
+  margin-bottom: 14px;
+}
+.profile-meta {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.profile-meta span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 14px;
+  color: #666;
+  background: #f5f5ff;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+.profile p {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #555;
+}
+
+/* ══ GAMES SECTION ══ */
+.section-title {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: #444;
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.section-title::before,
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(to right, transparent, #dde0ff);
+  max-width: 120px;
+}
+.section-title::after {
+  background: linear-gradient(to left, transparent, #dde0ff);
+}
+
+/* ══ CARDS ══ */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+}
+
+.card {
+  background: white;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+  display: flex;
+  flex-direction: column;
+}
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 36px rgba(102,126,234,0.22);
+}
+
+.card-top {
+  padding: 28px 20px 20px;
+  text-align: center;
+  position: relative;
+}
+.card-emoji {
+  font-size: 52px;
+  display: block;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.12));
+}
+.card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 0;
+}
+
+.card-body {
+  padding: 14px 20px;
+  flex: 1;
+  border-top: 1px solid #f0f0f5;
+}
+.card-body p {
+  font-size: 13.5px;
+  color: #666;
+  line-height: 1.7;
+}
+
+.card-footer {
+  padding: 14px 20px 20px;
+}
+.play-btn {
+  display: block;
+  width: 100%;
+  padding: 11px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  text-align: center;
+  text-decoration: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.play-btn:hover {
+  opacity: 0.88;
+  transform: scale(1.02);
+}
+
+/* カードごとのアクセントカラー */
+.card:nth-child(1) .card-top { background: linear-gradient(135deg, #ffecd2, #fcb69f); }
+.card:nth-child(2) .card-top { background: linear-gradient(135deg, #d4fc79, #96e6a1); }
+.card:nth-child(3) .card-top { background: linear-gradient(135deg, #a1c4fd, #c2e9fb); }
+.card:nth-child(4) .card-top { background: linear-gradient(135deg, #ffd1ff, #fad0c4); }
+
+/* ══ FOOTER ══ */
+footer {
+  background: #2d2d3a;
+  color: rgba(255,255,255,0.7);
+  text-align: center;
+  padding: 32px 20px;
+  font-size: 14px;
+  line-height: 2;
+}
+footer .update-note {
+  color: #aab4ff;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+footer small {
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+}
+
+/* ══ RESPONSIVE ══ */
+@media (max-width: 600px) {
+  header { padding: 44px 16px 40px; }
+  .profile { padding: 28px 24px; margin: -20px 0 36px; }
+  .cards { grid-template-columns: 1fr 1fr; gap: 14px; }
+}
+@media (max-width: 420px) {
+  .cards { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══ HEADER ══ -->
+<header>
+  <div class="stars">
+    <span class="star">⭐</span>
+    <span class="star">✨</span>
+    <span class="star">🌟</span>
+    <span class="star">⭐</span>
+    <span class="star">✨</span>
+  </div>
+  <div class="badge">🎮 WEBアプリギャラリー</div>
+  <h1>みかのつくったゲームたち</h1>
+  <p>小学生プログラマー みか が作ったゲーム・アプリ集</p>
+</header>
+
+<main>
+
+  <!-- ══ PROFILE ══ -->
+  <div class="profile">
+    <span class="avatar">👧</span>
+    <h2>みかについて</h2>
+    <div class="profile-meta">
+      <span>🎂 2016年10月27日生まれ</span>
+      <span>💻 2026年3月〜 バイブコーディング開始</span>
+    </div>
+    <p>
+      ClaudeとCursorを使ってはじめてWEBアプリを作りました。<br>
+      これからもどんどん新しいゲームを作っていく予定です！
+    </p>
+  </div>
+
+  <!-- ══ GAMES ══ -->
+  <p class="section-title">ゲームコレクション</p>
+
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-top">
+        <span class="card-emoji">⌨️</span>
+        <h3>みかちゅうタイピング</h3>
+      </div>
+      <div class="card-body">
+        <p>小学校3年生までに習う漢字を中心にしたタイピングゲーム。楽しみながら漢字の読みをおぼえよう！</p>
+      </div>
+      <div class="card-footer">
+        <a class="play-btn" href="みかちゅうタイピング.html" target="_blank">▶ 遊ぶ</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <span class="card-emoji">⚔️</span>
+        <h3>ゼドラの伝説</h3>
+      </div>
+      <div class="card-body">
+        <p>ドラクエとゼルダの伝説をくっつけたイメージで作った2D RPG。冒険に出かけよう！</p>
+      </div>
+      <div class="card-footer">
+        <a class="play-btn" href="linton_rpg.html" target="_blank">▶ 遊ぶ</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <span class="card-emoji">🏹</span>
+        <h3>弓使いの討伐</h3>
+      </div>
+      <div class="card-body">
+        <p>ドラゴンと虫を弓でやっつける2Dアクションゲーム。弓使いになって敵を討伐しよう！</p>
+      </div>
+      <div class="card-footer">
+        <a class="play-btn" href="game.html" target="_blank">▶ 遊ぶ</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-top">
+        <span class="card-emoji">🍜</span>
+        <h3>らーめん師匠</h3>
+      </div>
+      <div class="card-body">
+        <p>ラーメン屋さんとして、お客さんの注文に応えながらミッションをクリアしよう！</p>
+      </div>
+      <div class="card-footer">
+        <a class="play-btn" href="ramen_game.html" target="_blank">▶ 遊ぶ</a>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══ FOOTER ══ -->
+<footer>
+  <p class="update-note">🌟 これからも新しいゲームを追加していく予定！</p>
+  <p>みかのWEBアプリギャラリー</p>
+  <small>© 2026 みか</small>
+</footer>
+
+</body>
+</html>
